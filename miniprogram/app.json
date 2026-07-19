@@ -1,0 +1,47 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/dynamics/dynamics",
+    "pages/detail/detail",
+    "pages/login/login",
+    "pages/me/me",
+    "pages/search/search",
+    "pages/category/category"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#FFFFFF",
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "博客",
+    "backgroundColor": "#F5F7FB",
+    "navigationStyle": "default"
+  },
+  "tabBar": {
+    "color": "#64748B",
+    "selectedColor": "#2563EB",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "文章",
+        "iconPath": "images/tab/article.png",
+        "selectedIconPath": "images/tab/article-active.png"
+      },
+      {
+        "pagePath": "pages/dynamics/dynamics",
+        "text": "动态",
+        "iconPath": "images/tab/dynamics.png",
+        "selectedIconPath": "images/tab/dynamics-active.png"
+      },
+      {
+        "pagePath": "pages/me/me",
+        "text": "我的",
+        "iconPath": "images/tab/me.png",
+        "selectedIconPath": "images/tab/me-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents"
+}

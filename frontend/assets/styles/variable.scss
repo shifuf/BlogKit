@@ -1,0 +1,8 @@
+$layout-max-width: 1400px;
+$color-interactive-primary: #5184eb;
+$color-interactive-active: #37f;
+
+:root {
+  --site-header-background: transparent;
+  --nav-bg-color: var(--site-header-background);
+}

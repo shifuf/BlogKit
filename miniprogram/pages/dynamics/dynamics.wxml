@@ -1,0 +1,153 @@
+<view class="page dynamics-page">
+  <view class="moments-cover">
+    <image
+      wx:if="{{dynamicsBackground}}"
+      class="moments-cover__bg"
+      mode="aspectFill"
+      src="{{dynamicsBackground}}"
+    />
+    <view wx:else class="moments-cover__bg moments-cover__bg--fallback"></view>
+    <view class="moments-cover__shade"></view>
+    <view class="moments-cover__identity">
+      <view class="moments-cover__text">
+        <view class="moments-cover__name">{{profileName}}</view>
+        <view wx:if="{{dynamicsSignature}}" class="moments-cover__bio">{{dynamicsSignature}}</view>
+      </view>
+      <image class="moments-cover__avatar" mode="aspectFill" src="{{profileAvatar}}" />
+    </view>
+  </view>
+
+  <view class="moments-body">
+    <view wx:if="{{loading && !dynamics.length}}" class="skeleton-list">
+      <view class="skeleton-card" wx:for="{{[1,2,3]}}" wx:key="*this">
+        <view class="skeleton-line skeleton-line--wide"></view>
+        <view class="skeleton-line"></view>
+        <view class="skeleton-line skeleton-line--short"></view>
+      </view>
+    </view>
+
+    <view wx:elif="{{empty}}" class="empty-state">还没有动态。</view>
+
+    <view wx:else class="feed">
+      <view wx:for="{{dynamics}}" wx:key="id" class="feed-item">
+        <image class="feed-item__avatar" mode="aspectFill" src="{{profileAvatar}}" />
+        <view class="feed-item__main">
+          <view class="feed-item__name">{{profileName}}</view>
+
+          <rich-text wx:if="{{item.hasText}}" class="feed-item__text" nodes="{{item.textHtml}}"></rich-text>
+
+          <view
+            wx:if="{{item.gridItems.length}}"
+            class="feed-gallery feed-gallery--{{item.imageCount === 1 ? 'one' : (item.imageCount === 4 ? 'four' : 'nine')}}"
+          >
+            <view
+              wx:for="{{item.gridItems}}"
+              wx:for-item="cell"
+              wx:key="key"
+              class="feed-gallery__cell"
+              data-id="{{item.id}}"
+              data-index="{{cell.index}}"
+              bindtap="previewImage"
+            >
+              <image
+                class="feed-gallery__img"
+                mode="{{item.imageCount === 1 ? 'widthFix' : 'aspectFill'}}"
+                src="{{cell.src}}"
+                lazy-load
+              />
+              <view wx:if="{{item.extra && cell.index === 8}}" class="feed-gallery__more">+{{item.extra}}</view>
+            </view>
+          </view>
+
+          <view class="feed-item__meta">
+            <view class="feed-item__time">
+              <text>{{item.displayTime}}</text>
+              <text wx:if="{{item.locationText}}" class="feed-item__loc"> · {{item.locationText}}</text>
+            </view>
+            <view class="feed-item__actions">
+              <view class="feed-action {{item.liked ? 'feed-action--on' : ''}}" data-id="{{item.id}}" bindtap="tapLike">
+                <view class="ic {{item.liked ? 'ic-heart-on' : 'ic-heart'}}"></view>
+                <text>{{item.likeCount}}</text>
+              </view>
+              <view class="feed-action" data-id="{{item.id}}" bindtap="openComments">
+                <view class="ic ic-chat"></view>
+                <text>{{item.commentCount}}</text>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{loading && dynamics.length}}" class="load-more">正在加载...</view>
+    <view wx:if="{{finished && dynamics.length}}" class="load-more">已经到底了</view>
+  </view>
+</view>
+
+<view wx:if="{{commentModalVisible}}" class="sheet-mask" bindtap="closeComments">
+  <view class="sheet" catchtap="noop">
+    <view class="sheet__head">
+      <view class="sheet__handle"></view>
+      <text class="sheet__title">评论 {{commentTotal}}</text>
+      <view class="ic ic-close sheet__close" bindtap="closeComments"></view>
+    </view>
+
+    <scroll-view class="sheet__body" scroll-y bindscrolltolower="loadMoreComments">
+      <view wx:if="{{!comments.length && !commentLoading}}" class="sheet__empty">来抢沙发</view>
+
+      <view wx:for="{{comments}}" wx:key="id" class="cmt">
+        <view class="cmt__avatar">{{item.authorName[0] || '游'}}</view>
+        <view class="cmt__body">
+          <view class="cmt__head">
+            <text class="cmt__name">{{item.authorName}}</text>
+            <text wx:if="{{item.region}}" class="cmt__region">{{item.region}}</text>
+          </view>
+          <view class="cmt__content">{{item.content}}</view>
+          <view class="cmt__foot">
+            <text class="cmt__time">{{item.displayTime}}</text>
+            <text class="cmt__reply" data-root="{{item.id}}" data-author="{{item.authorName}}" bindtap="tapReply">回复</text>
+          </view>
+
+          <view wx:if="{{item.replies.length}}" class="cmt__replies">
+            <view wx:for="{{item.replies}}" wx:for-item="reply" wx:key="id" class="cmt-reply">
+              <view class="cmt-reply__line">
+                <text class="cmt-reply__name">{{reply.authorName}}</text>
+                <text wx:if="{{reply.replyTo}}" class="cmt-reply__to"> 回复 {{reply.replyTo}}</text>
+                <text>：{{reply.content}}</text>
+              </view>
+              <view class="cmt-reply__foot">
+                <text wx:if="{{reply.region}}" class="cmt__region">{{reply.region}}</text>
+                <text class="cmt__reply" data-root="{{item.id}}" data-author="{{reply.authorName}}" bindtap="tapReply">回复</text>
+              </view>
+            </view>
+          </view>
+        </view>
+      </view>
+
+      <view wx:if="{{commentLoading}}" class="sheet__empty">加载中...</view>
+    </scroll-view>
+
+    <view class="sheet__composer">
+      <input
+        wx:if="{{!hasSession}}"
+        class="sheet__name"
+        value="{{guestName}}"
+        placeholder="昵称(选填)"
+        maxlength="40"
+        bindinput="onGuestNameInput"
+      />
+      <view class="sheet__input-row">
+        <textarea
+          class="sheet__input"
+          value="{{commentContent}}"
+          placeholder="{{replyTargetAuthor ? '回复 @' + replyTargetAuthor : '说点什么...'}}"
+          maxlength="1000"
+          auto-height
+          bindinput="onCommentInput"
+        />
+        <button class="primary-button sheet__send" loading="{{submittingComment}}" bindtap="submitComment">发送</button>
+      </view>
+      <text wx:if="{{replyTargetAuthor}}" class="sheet__cancel" bindtap="cancelReply">取消回复</text>
+    </view>
+  </view>
+</view>

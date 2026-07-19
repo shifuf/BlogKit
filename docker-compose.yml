@@ -1,0 +1,128 @@
+services:
+  postgres:
+    image: ${POSTGRES_IMAGE:-docker.m.daocloud.io/library/postgres:17-alpine}
+    container_name: blog-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-blog_system}
+      POSTGRES_USER: ${DB_USERNAME:-blog}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      TZ: Asia/Shanghai
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    # 部分主机 seccomp/apparmor 会拦截 postgres 写 pid/xact；放宽后仍使用 Docker volume
+    security_opt:
+      - seccomp:unconfined
+      - apparmor:unconfined
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    mem_limit: 512m
+    networks:
+      - blog-network
+
+  redis:
+    image: ${REDIS_IMAGE:-docker.m.daocloud.io/library/redis:7-alpine}
+    container_name: blog-redis
+    restart: unless-stopped
+    environment:
+      TZ: Asia/Shanghai
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    mem_limit: 128m
+    networks:
+      - blog-network
+
+  backend:
+    build:
+      context: .
+      dockerfile: docker/backend.Dockerfile
+      args:
+        JDK_BUILD_IMAGE: ${JDK_BUILD_IMAGE:-docker.m.daocloud.io/library/eclipse-temurin:17-jdk-alpine}
+        JRE_RUNTIME_IMAGE: ${JRE_RUNTIME_IMAGE:-docker.m.daocloud.io/library/eclipse-temurin:17-jre-alpine}
+    container_name: blog-backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    environment:
+      # 运行环境：.env 中 BLOG_ENV（dev/prod），Compose 默认 prod
+      BLOG_ENV: ${BLOG_ENV:-prod}
+      SPRING_PROFILES_ACTIVE: ${BLOG_ENV:-prod}
+      SERVER_PORT: 8080
+      # Docker 内固定走服务名，无需在 .env 写 DB_URL / REDIS_HOST
+      DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-blog_system}
+      DB_USERNAME: ${DB_USERNAME:-blog}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ""
+      REDIS_DATABASE: 0
+      BLOG_ADMIN_USERNAME: ${BLOG_ADMIN_USERNAME:-admin}
+      BLOG_ADMIN_PASSWORD: ${BLOG_ADMIN_PASSWORD:?set BLOG_ADMIN_PASSWORD in .env}
+      BLOG_ADMIN_DISPLAY_NAME: ${BLOG_ADMIN_DISPLAY_NAME:-站点管理员}
+      UPLOAD_ROOT_DIR: /app/uploads
+      BLOG_DOWNLOAD_SECRET_KEY: ${BLOG_DOWNLOAD_SECRET_KEY:?set BLOG_DOWNLOAD_SECRET_KEY in .env}
+      BLOG_TOTP_SECRET_KEY: ${BLOG_TOTP_SECRET_KEY:-}
+      BLOG_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
+      BLOG_BACKUP_ENCRYPTION_KEY: ${BLOG_BACKUP_ENCRYPTION_KEY:?set BLOG_BACKUP_ENCRYPTION_KEY in .env}
+      # 单一站点地址：有域名填 BLOG_SITE_URL；留空则运行时按请求 Host 自动识别
+      BLOG_SITE_URL: ${BLOG_SITE_URL:-}
+      BLOG_PUBLIC_SITE_URL: ${BLOG_SITE_URL:-}
+      # 容器内体检固定走 compose 网络前台服务
+      BLOG_HEALTH_SITE_URL: http://frontend:3256
+      BLOG_MUSIC_API_KEY: ${BLOG_MUSIC_API_KEY:-}
+      WECHAT_MINI_PROGRAM_APP_ID: ${WECHAT_MINI_PROGRAM_APP_ID:-}
+      WECHAT_MINI_PROGRAM_APP_SECRET: ${WECHAT_MINI_PROGRAM_APP_SECRET:-}
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus,caches
+      TZ: Asia/Shanghai
+    volumes:
+      - uploads-data:/app/uploads
+    networks:
+      - blog-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/frontend.Dockerfile
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-docker.m.daocloud.io/library/node:22-alpine}
+        BLOG_BACKEND_ORIGIN: http://backend:8080
+        NUXT_PUBLIC_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
+        VITE_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
+        BLOG_ADMIN_BASE_PATH: ${BLOG_ADMIN_BASE_PATH:-/admin}
+    container_name: blog-frontend
+    restart: unless-stopped
+    depends_on:
+      - backend
+    environment:
+      BLOG_ENV: ${BLOG_ENV:-prod}
+      NODE_ENV: production
+      NITRO_HOST: 0.0.0.0
+      NITRO_PORT: 3256
+      BLOG_BACKEND_ORIGIN: http://backend:8080
+      # 与后端共用 BLOG_SITE_URL；留空则 Nuxt 按访问地址自动识别
+      NUXT_PUBLIC_SITE_URL: ${BLOG_SITE_URL:-}
+      BLOG_ADMIN_BASE_PATH: ${BLOG_ADMIN_BASE_PATH:-/admin}
+      NUXT_PUBLIC_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:-}
+      SENIVERSE_WIDGET_TOKEN: ${SENIVERSE_WIDGET_TOKEN:-}
+      NUXT_SENIVERSE_WIDGET_TOKEN: ${SENIVERSE_WIDGET_TOKEN:-}
+      TZ: Asia/Shanghai
+    ports:
+      - "${FRONTEND_PORT:-3256}:3256"
+    networks:
+      - blog-network
+
+networks:
+  blog-network:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+  uploads-data:

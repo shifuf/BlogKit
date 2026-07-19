@@ -1,0 +1,9 @@
+{
+  "navigationBarTitleText": "动态",
+  "navigationBarBackgroundColor": "#FFFFFF",
+  "navigationBarTextStyle": "black",
+  "backgroundColor": "#F5F7FB",
+  "enablePullDownRefresh": true,
+  "backgroundTextStyle": "dark",
+  "onReachBottomDistance": 80
+}

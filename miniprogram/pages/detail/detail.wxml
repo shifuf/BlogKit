@@ -1,0 +1,242 @@
+<view class="page detail-page">
+  <view wx:if="{{loading && !article}}" class="empty-state">正在加载文章...</view>
+
+  <view wx:elif="{{article}}" class="article-detail">
+    <view class="article-hero surface">
+      <image class="article-hero__cover" mode="aspectFill" src="{{article.coverUrl}}" binderror="handleCoverError" />
+      <view class="article-hero__body">
+        <view class="article-hero__meta">
+          <text class="pill">{{article.categoryName || '未分类'}}</text>
+          <text wx:if="{{article.location}}" class="pill pill--loc">{{article.location}}</text>
+        </view>
+        <view class="article-hero__title">{{article.title}}</view>
+        <view wx:if="{{article.summary}}" class="article-hero__summary">{{article.summary}}</view>
+        <view class="article-hero__metrics">
+          <text class="metric">{{article.authorName}}</text>
+          <text class="article-hero__dot">·</text>
+          <text class="metric">{{article.displayTime}}</text>
+          <text class="article-hero__dot">·</text>
+          <view class="metric"><view class="ic ic-eye ic--sm"></view><text>{{article.viewCount}}</text></view>
+          <block wx:if="{{commentsEnabled}}">
+            <text class="article-hero__dot">·</text>
+            <view class="metric"><view class="ic ic-chat ic--sm"></view><text>{{article.commentCount}}</text></view>
+          </block>
+        </view>
+      </view>
+    </view>
+
+    <view class="article-actions surface">
+      <button class="action-button {{engagement.liked ? 'action-button--active' : ''}}" loading="{{likingArticle}}" bindtap="tapLikeArticle">
+        <view class="ic {{engagement.liked ? 'ic-heart-on' : 'ic-heart'}}"></view>
+        <text>赞 {{article.likeCount}}</text>
+      </button>
+      <button class="action-button action-button--fav {{engagement.favorited ? 'action-button--active' : ''}}" loading="{{favoritingArticle}}" bindtap="tapFavoriteArticle">
+        <view class="ic {{engagement.favorited ? 'ic-star-on' : 'ic-star'}}"></view>
+        <text>收藏 {{article.favoriteCount}}</text>
+      </button>
+    </view>
+
+    <view class="article-content surface">
+      <view wx:if="{{article.locked}}" class="article-lock">
+        <view class="ic ic-lock ic--lg article-lock__icon"></view>
+        <block wx:if="{{article.requiresPassword}}">
+          <view class="article-lock__title">本文需要访问密码</view>
+          <view class="article-lock__form">
+            <input class="article-lock__input" type="text" password="{{true}}" placeholder="请输入访问密码" value="{{unlockPassword}}" bindinput="onUnlockInput" />
+            <button class="article-lock__btn" loading="{{unlocking}}" bindtap="submitUnlock">解锁查看</button>
+          </view>
+        </block>
+        <block wx:elif="{{article.visibility === 'LOGIN'}}">
+          <view class="article-lock__title">本文登录后可见</view>
+          <button wx:if="{{!isLoggedIn}}" class="article-lock__btn" bindtap="goLoginForArticle">登录查看</button>
+        </block>
+        <block wx:else>
+          <view class="article-lock__title">{{isLoggedIn ? '你没有查看该文章的权限' : '本文仅指定用户可见'}}</view>
+          <button wx:if="{{!isLoggedIn}}" class="article-lock__btn" bindtap="goLoginForArticle">登录查看</button>
+        </block>
+      </view>
+      <block wx:else>
+        <rich-text wx:if="{{article.contentIsHtml}}" nodes="{{article.content}}"></rich-text>
+        <view wx:else>
+          <block wx:for="{{article.contentBlocks}}" wx:for-index="bi" wx:key="bi">
+            <image
+              wx:if="{{item.type === 'image'}}"
+              class="article-content__image"
+              mode="widthFix"
+              src="{{item.src}}"
+              data-src="{{item.src}}"
+              bindtap="previewContentImage"
+            />
+            <rich-text wx:elif="{{item.type === 'html'}}" class="article-content__md" nodes="{{item.html}}"></rich-text>
+
+            <!-- 下载卡片 -->
+            <view wx:elif="{{item.type === 'download'}}" class="bd-card">
+              <view class="bd-card__head">
+                <text class="bd-card__badge">资源下载</text>
+                <text class="bd-card__title">{{item.title}}</text>
+                <text wx:if="{{item.gate !== 'none'}}" class="bd-card__gate">{{item.gate === 'login' ? '登录可见' : '评论可见'}}</text>
+              </view>
+              <view wx:if="{{item.desc}}" class="bd-card__desc">{{item.desc}}</view>
+              <block wx:if="{{item.gate === 'none' || (item.gate === 'login' && isLoggedIn) || (item.gate === 'comment' && hasCommented)}}">
+                <view
+                  wx:for="{{item.items}}"
+                  wx:for-item="dl"
+                  wx:for-index="di"
+                  wx:key="di"
+                  class="bd-card__item"
+                  data-bi="{{bi}}"
+                  data-di="{{di}}"
+                  bindtap="tapDownload"
+                >
+                  <view class="bd-card__item-main">
+                    <text class="bd-card__item-name">{{dl.name || dl.label}}</text>
+                    <text class="bd-card__item-sub">{{dl.label}}{{dl.hasCode ? ' · 含提取码' : ''}}</text>
+                  </view>
+                  <text class="bd-card__item-go">复制链接</text>
+                </view>
+              </block>
+              <view wx:else class="bd-locked" data-gate="{{item.gate}}" bindtap="tapUnlock">
+                {{item.gate === 'comment' ? '评论后可查看下载地址' : '登录后可查看下载地址'}}
+              </view>
+            </view>
+
+            <!-- 自定义按钮 -->
+            <view wx:elif="{{item.type === 'button'}}" class="bd-button-wrap">
+              <button
+                wx:if="{{item.gate === 'none' || (item.gate === 'login' && isLoggedIn) || (item.gate === 'comment' && hasCommented)}}"
+                class="bd-link-button"
+                data-bi="{{bi}}"
+                bindtap="tapCustomButton"
+              >{{item.text}}</button>
+              <view wx:else class="bd-locked" data-gate="{{item.gate}}" bindtap="tapUnlock">
+                {{item.gate === 'comment' ? '评论后可见' : '登录后可见'}}
+              </view>
+            </view>
+
+            <!-- 隐藏内容：服务端未授权时块体已清空，以 blocks 是否有内容为准（勿仅靠本地 soft gate） -->
+            <view wx:elif="{{item.type === 'secret'}}" class="bd-secret">
+              <block wx:if="{{item.blocks && item.blocks.length}}">
+                <block wx:for="{{item.blocks}}" wx:for-item="sub" wx:for-index="si" wx:key="si">
+                  <image
+                    wx:if="{{sub.type === 'image'}}"
+                    class="article-content__image"
+                    mode="widthFix"
+                    src="{{sub.src}}"
+                    data-src="{{sub.src}}"
+                    bindtap="previewContentImage"
+                  />
+                  <rich-text wx:elif="{{sub.type === 'html'}}" class="article-content__md" nodes="{{sub.html}}"></rich-text>
+                  <view wx:elif="{{sub.type === 'gallery'}}" class="bd-gallery bd-gallery--{{sub.count === 1 ? 'single' : 'grid'}}">
+                    <view
+                      wx:for="{{sub.gridItems}}"
+                      wx:for-item="cell"
+                      wx:key="key"
+                      class="bd-gallery__cell"
+                      data-index="{{cell.index}}"
+                      data-bi="{{bi}}"
+                      data-kind="gallery"
+                      bindtap="previewGalleryImage"
+                    >
+                      <image class="bd-gallery__img" mode="{{sub.count === 1 ? 'widthFix' : 'aspectFill'}}" src="{{cell.src}}" lazy-load />
+                      <view wx:if="{{sub.extra && cell.index === 8}}" class="bd-gallery__more">+{{sub.extra}}</view>
+                    </view>
+                  </view>
+                </block>
+              </block>
+              <view wx:else class="bd-locked bd-locked--secret" data-gate="{{item.gate}}" bindtap="tapUnlock">
+                <view class="ic ic-lock"></view>
+                <text>{{item.gate === 'comment' ? '评论后可见此处内容' : '登录后可见此处内容'}}</text>
+              </view>
+            </view>
+
+            <!-- 图库九宫格：列表缩略，点击按 index 预览原图 -->
+            <view wx:elif="{{item.type === 'gallery'}}" class="bd-gallery bd-gallery--{{item.count === 1 ? 'single' : 'grid'}}">
+              <view
+                wx:for="{{item.gridItems}}"
+                wx:for-item="cell"
+                wx:key="key"
+                class="bd-gallery__cell"
+                data-index="{{cell.index}}"
+                data-bi="{{bi}}"
+                data-kind="gallery"
+                bindtap="previewGalleryImage"
+              >
+                <image class="bd-gallery__img" mode="{{item.count === 1 ? 'widthFix' : 'aspectFill'}}" src="{{cell.src}}" lazy-load />
+                <view wx:if="{{item.extra && cell.index === 8}}" class="bd-gallery__more">+{{item.extra}}</view>
+              </view>
+            </view>
+          </block>
+        </view>
+      </block>
+    </view>
+
+    <view wx:if="{{commentsEnabled}}" class="comments surface">
+      <view class="comments__header">
+        <view class="section-title">评论</view>
+        <view class="muted">{{comments.length}} 条</view>
+      </view>
+
+      <view class="composer">
+        <textarea class="composer__input" value="{{commentContent}}" placeholder="{{isLoggedIn ? '写下你的评论' : '登录后可评论'}}" maxlength="2000" auto-height bindinput="onCommentInput" disabled="{{!isLoggedIn}}" />
+        <view class="composer__bar">
+          <button class="primary-button composer__button" loading="{{submittingComment}}" bindtap="submitComment">
+            {{isLoggedIn ? '发布评论' : '去登录'}}
+          </button>
+        </view>
+      </view>
+
+      <view wx:if="{{!comments.length}}" class="comments__empty">还没有评论。</view>
+      <view wx:for="{{comments}}" wx:key="id" class="comment">
+        <view class="comment__main">
+          <view class="comment__author">{{item.authorName}}</view>
+          <view class="comment__time">
+            <text>{{item.displayTime}}</text>
+            <text wx:if="{{item.region}}" class="comment__region">{{item.region}}</text>
+          </view>
+        </view>
+        <view class="comment__content">{{item.content}}</view>
+        <view class="comment__actions">
+          <text data-id="{{item.id}}" bindtap="tapCommentLike">赞 {{item.likeCount}}</text>
+          <text data-root="{{item.id}}" data-author="{{item.authorName}}" bindtap="openReply">回复{{item.replyCount ? ' ' + item.replyCount : ''}}</text>
+        </view>
+
+        <view wx:if="{{item.replies.length}}" class="comment__replies">
+          <view wx:for="{{item.replies}}" wx:for-item="reply" wx:key="id" class="comment__reply">
+            <view class="comment__reply-line">
+              <text class="comment__reply-author">{{reply.authorName}}：</text>{{reply.content}}
+            </view>
+            <view class="comment__reply-meta">
+              <text wx:if="{{reply.region}}" class="comment__region">{{reply.region}}</text>
+              <text class="comment__reply-btn" data-root="{{item.id}}" data-author="{{reply.authorName}}" bindtap="openReply">回复</text>
+            </view>
+          </view>
+        </view>
+
+        <view wx:if="{{activeReplyId === item.id}}" class="reply-composer">
+          <textarea
+            class="reply-composer__input"
+            value="{{replyContent}}"
+            placeholder="{{replyTargetAuthor ? '回复 @' + replyTargetAuthor : '写下你的回复'}}"
+            maxlength="2000"
+            auto-height
+            bindinput="onReplyInput"
+          />
+          <view class="reply-composer__bar">
+            <button class="ghost-button reply-composer__cancel" bindtap="closeReply">取消</button>
+            <button class="primary-button reply-composer__submit" loading="{{submittingReply}}" bindtap="submitReply">回复</button>
+          </view>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{related.length}}" class="related">
+      <view class="section-title">相关文章</view>
+      <view wx:for="{{related}}" wx:key="id" class="related-card surface" data-id="{{item.id}}" bindtap="goRelated">
+        <view class="related-card__title">{{item.title}}</view>
+        <view class="related-card__meta">{{item.categoryName}} · {{item.displayTime}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:else class="empty-state">文章不存在或暂不可访问。</view>
+</view>

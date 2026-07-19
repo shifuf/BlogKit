@@ -1,0 +1,90 @@
+<view class="page index-page">
+  <view class="home-search-wrap">
+    <view class="home-search">
+      <view class="ic ic-search home-search__icon"></view>
+      <input
+        class="home-search__input"
+        value="{{keywordInput}}"
+        placeholder="搜索文章"
+        placeholder-class="home-search__ph"
+        confirm-type="search"
+        bindinput="onKeywordInput"
+        bindconfirm="submitSearch"
+      />
+      <view wx:if="{{keywordInput}}" class="ic ic-close ic--sm home-search__clear" bindtap="clearKeyword"></view>
+    </view>
+  </view>
+
+  <view class="home-tools">
+    <scroll-view class="cat-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="cat-scroll__inner">
+        <view
+          wx:for="{{categories}}"
+          wx:key="slug"
+          class="cat-chip {{selectedCategorySlug === item.slug ? 'cat-chip--on' : ''}}"
+          data-slug="{{item.slug}}"
+          data-name="{{item.name}}"
+          bindtap="selectCategory"
+        >{{item.name}}</view>
+      </view>
+    </scroll-view>
+
+    <view class="sort-row">
+      <view
+        wx:for="{{sortOptions}}"
+        wx:key="value"
+        class="sort-item {{sort === item.value ? 'sort-item--on' : ''}}"
+        data-value="{{item.value}}"
+        bindtap="selectSort"
+      >{{item.label}}</view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && !articles.length}}" class="skeleton-list">
+    <view class="skeleton-card" wx:for="{{skeletonItems}}" wx:key="*this">
+      <view class="skeleton-line skeleton-line--wide"></view>
+      <view class="skeleton-line"></view>
+      <view class="skeleton-line skeleton-line--short"></view>
+    </view>
+  </view>
+
+  <view wx:elif="{{!articles.length}}" class="empty-state">暂无文章，换个关键词或分类试试。</view>
+
+  <view wx:else class="feed-list">
+    <view
+      wx:for="{{articles}}"
+      wx:key="id"
+      class="feed-card"
+      data-id="{{item.id}}"
+      bindtap="goDetail"
+    >
+      <view class="feed-card__cover-wrap">
+        <image
+          class="feed-card__cover"
+          mode="aspectFill"
+          src="{{item.coverUrl}}"
+          data-id="{{item.id}}"
+          binderror="handleCoverError"
+          lazy-load
+        />
+        <view wx:if="{{item.sticky}}" class="feed-card__sticky">置顶</view>
+      </view>
+      <view class="feed-card__body">
+        <view class="feed-card__top">
+          <text class="feed-card__cat">{{item.categoryName || '未分类'}}</text>
+          <text class="feed-card__time">{{item.displayTime}}</text>
+        </view>
+        <view class="feed-card__title">{{item.title}}</view>
+        <view wx:if="{{item.summary}}" class="feed-card__summary">{{item.summary}}</view>
+        <view class="feed-card__foot">
+          <view class="feed-card__m"><view class="ic ic-eye ic--sm"></view><text>{{item.viewCount}}</text></view>
+          <view class="feed-card__m"><view class="ic ic-heart ic--sm"></view><text>{{item.likeCount}}</text></view>
+          <view wx:if="{{commentsEnabled}}" class="feed-card__m"><view class="ic ic-chat ic--sm"></view><text>{{item.commentCount}}</text></view>
+        </view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && articles.length}}" class="load-more">正在加载...</view>
+  <view wx:if="{{finished && articles.length}}" class="load-more">已经到底了</view>
+</view>

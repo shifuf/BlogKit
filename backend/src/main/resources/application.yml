@@ -1,0 +1,150 @@
+server:
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: blog-backend
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://localhost:5432/blog_system}
+    username: ${DB_USERNAME:blog}
+    password: ${DB_PASSWORD:123456}
+    driver-class-name: org.postgresql.Driver
+    hikari:
+      # 小内存 VPS：连接池不宜过大（每连接占内存且 PG 端也有开销）。8 个足够单实例博客并发；
+      # 与外部慢调用叠加时，显式 connection-timeout 让请求快速失败而非无限等连接。
+      maximum-pool-size: ${DB_POOL_MAX:8}
+      minimum-idle: ${DB_POOL_MIN:2}
+      connection-timeout: ${DB_POOL_CONN_TIMEOUT:10000}
+      idle-timeout: ${DB_POOL_IDLE_TIMEOUT:300000}
+      max-lifetime: ${DB_POOL_MAX_LIFETIME:1200000}
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      database: ${REDIS_DATABASE:0}
+      timeout: 3000ms
+  cache:
+    type: redis
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
+  jpa:
+    hibernate:
+      ddl-auto: ${JPA_DDL_AUTO:update}
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Shanghai
+          batch_size: 50
+        order_inserts: true
+        order_updates: true
+        default_batch_fetch_size: 50
+        session:
+          events:
+            log:
+          LOG_QUERIES_SLOWER_THAN_MS: ${SLOW_SQL_THRESHOLD_MS:500}
+  flyway:
+    enabled: ${FLYWAY_ENABLED:true}
+    baseline-on-migrate: true
+    baseline-version: 1
+    validate-on-migrate: true
+    locations: classpath:db/migration
+
+sa-token:
+  token-name: Authorization
+  token-prefix: Bearer
+  timeout: 2592000
+  # 空闲超时：7 天(604800s)无任何请求才失效；Sa-Token 每次通过校验的请求都会把该计时刷新到当前，
+  # 即「活跃即续期，最长 7 天空闲」——用户只要 7 天内有访问就保持登录，实现无感刷新，无需独立 refresh token。
+  active-timeout: ${SA_TOKEN_ACTIVE_TIMEOUT:604800}
+  is-concurrent: true
+  is-share: true
+  token-style: uuid
+  is-log: false
+  # 不向浏览器写可读 cookie：前后端均用 Authorization: Bearer 头传 token（存 localStorage）。
+  # 避免 is-read-cookie 默认行为在部分集成里把 token 落到 document.cookie。
+  is-read-cookie: false
+  is-read-header: true
+  is-read-body: false
+
+blog:
+  bootstrap:
+    admin:
+      username: ${BLOG_ADMIN_USERNAME:admin}
+      password: ${BLOG_ADMIN_PASSWORD:123456}
+      display-name: ${BLOG_ADMIN_DISPLAY_NAME:站点管理员}
+  upload:
+    root-dir: ${UPLOAD_ROOT_DIR:./uploads}
+    public-path: /uploads
+  # 下载/按钮信息的对称加密口令（仅后端持有；生产务必改高强度随机串，勿与前端公开密钥相同）
+  download:
+    secret-key: ${BLOG_DOWNLOAD_SECRET_KEY:}
+  # 管理员 TOTP 密封口令（建议独立；未配置时回退 download.secret-key）
+  totp:
+    secret-key: ${BLOG_TOTP_SECRET_KEY:}
+  # 音乐等接口响应混淆密钥（会进浏览器 JS，仅防直接抓接口；.env 只填 BLOG_API_PAYLOAD_SECRET，勿复用下载密钥）
+  api-payload:
+    secret-key: ${BLOG_API_PAYLOAD_SECRET:}
+  # 统一文件管理对接配置：实际值在后台「系统设置 - 上传设置」填写并存库，此处仅为启动兜底默认。
+  file-manager:
+    base-url: ${FILE_MANAGER_BASE_URL:}
+    api-prefix: ${FILE_MANAGER_API_PREFIX:/api}
+    app-id: ${FILE_MANAGER_APP_ID:}
+    app-secret: ${FILE_MANAGER_APP_SECRET:}
+    folder-path: ${FILE_MANAGER_FOLDER_PATH:blog-system}
+    duplicate-strategy: ${FILE_MANAGER_DUPLICATE_STRATEGY:reuse}
+    request-timeout-seconds: ${FILE_MANAGER_REQUEST_TIMEOUT_SECONDS:45}
+  cors:
+    # 默认空=同源（经 Nuxt 反代），不放开跨域；有独立前端域名直连后端时填逗号分隔的 origin。
+    allowed-origins: ${BLOG_CORS_ALLOWED_ORIGINS:}
+  security:
+    # 客户端与本服务之间会向 X-Forwarded-For 追加条目的可信反代跳数（nginx 追加 1 跳；防 XFF 伪造）。
+    trusted-proxy-count: ${BLOG_TRUSTED_PROXY_COUNT:1}
+    # 仅显式列出的主机可访问私网地址；本机通知平台/文件管理可保留 localhost，生产按需收紧。
+    outbound-private-host-allowlist: ${BLOG_OUTBOUND_PRIVATE_HOST_ALLOWLIST:localhost,127.0.0.1,::1}
+  backup:
+    dir: ${BLOG_BACKUP_DIR:./backups}
+    cron: ${BLOG_BACKUP_CRON:0 0 3 * * *}
+    encryption-key: ${BLOG_BACKUP_ENCRYPTION_KEY:}
+  # 对外公开站点地址：优先 BLOG_SITE_URL；留空则按请求 Host 自动识别。
+  public-site-url: ${BLOG_SITE_URL:${BLOG_PUBLIC_SITE_URL:}}
+  notification-platform:
+    base-url: ${BLOG_NOTIFY_BASE_URL:http://localhost:3000}
+    api-key: ${BLOG_NOTIFY_API_KEY:}
+    timeout-seconds: ${BLOG_NOTIFY_TIMEOUT_SECONDS:10}
+  music:
+    # 音乐组件的搜索/播放解析接口；由后端代理，避免浏览器直接依赖第三方搜索接口。
+    api-base: ${BLOG_MUSIC_API_BASE:https://cyapi.top/API/qq_music.php}
+    api-key: ${BLOG_MUSIC_API_KEY:}
+    resource-api-base: ${BLOG_MUSIC_RESOURCE_API_BASE:https://www.qqmp3.vip/api}
+  health:
+    # 站点体检探测 /feed.xml、/sitemap.xml 用的地址。后端与前端是独立容器，
+    # 后端内 localhost 没有前端服务，需用 compose 网络内的服务名 frontend:3256。
+    # 独立变量(不复用 NUXT_PUBLIC_SITE_URL)：公开域名可能无法从容器内回环访问(DNS/防火墙/TLS)，体检走内网更稳。
+    site-url: ${BLOG_HEALTH_SITE_URL:http://localhost:3256}
+  wechat:
+    mini-program:
+      app-id: ${WECHAT_MINI_PROGRAM_APP_ID:}
+      app-secret: ${WECHAT_MINI_PROGRAM_APP_SECRET:}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: ${MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE:health,info,metrics,prometheus,caches}
+      base-path: /actuator
+  endpoint:
+    health:
+      show-details: when_authorized
+  metrics:
+    tags:
+      application: ${spring.application.name}
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+      slo:
+        http.server.requests: 100ms,300ms,1s,3s

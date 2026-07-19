@@ -1,0 +1,66 @@
+<view class="page login-page">
+  <view wx:if="{{ssoMode}}" class="login-card surface sso-card">
+    <view class="login-card__eyebrow">SSO</view>
+    <view class="login-card__title">确认授权</view>
+    <view class="login-card__subtitle">你正在通过小程序扫码完成认证中心操作。确认后网页端会自动继续。</view>
+
+    <view class="sso-status {{ssoConfirmed ? 'sso-status--done' : ''}}">
+      <view class="sso-status__title">{{ssoConfirmed ? '已确认' : '等待确认'}}</view>
+      <view class="sso-status__text">{{ssoConfirmed ? '请返回网页查看结果。' : '点击下方按钮授权本次操作。'}}</view>
+    </view>
+
+    <button
+      class="primary-button submit-button"
+      loading="{{ssoLoading}}"
+      disabled="{{ssoConfirmed}}"
+      bindtap="confirmSsoLogin"
+    >
+      {{ssoConfirmed ? '已确认授权' : '确认授权'}}
+    </button>
+
+    <view wx:if="{{ssoError}}" class="login-card__notice">{{ssoError}}</view>
+    <view class="sso-tip">如果网页长时间无响应，请重新打开测试页生成新的二维码。</view>
+  </view>
+
+  <view wx:else class="login-card surface">
+    <view class="login-card__eyebrow">ACCOUNT</view>
+    <view class="login-card__title">{{mode === 'login' ? '登录账号' : '创建账号'}}</view>
+    <view class="login-card__subtitle">登录后可点赞、收藏文章，同步个人记录。</view>
+
+    <button class="wechat-button" loading="{{wechatLoading}}" bindtap="loginWithWechat">
+      微信授权登录
+    </button>
+
+    <view class="login-divider">
+      <view></view>
+      <text>或使用账号密码</text>
+      <view></view>
+    </view>
+
+    <view class="mode-switch">
+      <view class="mode-switch__item {{mode === 'login' ? 'mode-switch__item--active' : ''}}" data-mode="login" bindtap="switchMode">登录</view>
+      <view class="mode-switch__item {{mode === 'register' ? 'mode-switch__item--active' : ''}} {{!allowRegister ? 'mode-switch__item--disabled' : ''}}" data-mode="register" bindtap="switchMode">注册</view>
+    </view>
+
+    <view wx:if="{{mode === 'register'}}" class="field">
+      <view class="field__label">昵称</view>
+      <input class="field__input" value="{{displayName}}" placeholder="用于账号展示" bindinput="onDisplayNameInput" />
+    </view>
+
+    <view class="field">
+      <view class="field__label">用户名</view>
+      <input class="field__input" value="{{username}}" placeholder="请输入用户名" bindinput="onUsernameInput" />
+    </view>
+
+    <view class="field">
+      <view class="field__label">密码</view>
+      <input class="field__input" value="{{password}}" password placeholder="请输入密码" bindinput="onPasswordInput" />
+    </view>
+
+    <button class="primary-button submit-button" loading="{{loading}}" bindtap="submit">
+      {{mode === 'login' ? '登录' : '注册并登录'}}
+    </button>
+
+    <view wx:if="{{!allowRegister}}" class="login-card__notice">当前站点已关闭普通用户注册。</view>
+  </view>
+</view>

@@ -1,0 +1,725 @@
+/* 后台全局响应式与列表美化：统一调优，不改各业务页。
+   覆盖 .admin-page / .table-page-search-wrapper / .comment-admin-page。 */
+
+html,
+body,
+#app {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+/*
+ * 移动端：所有可输入控件字号强制 ≥16px。
+ * iOS Safari 会对小于 16px 的输入框聚焦时整页缩放，导致后台弹窗/编辑器按钮点不到。
+ * 覆盖原生、Ant Design Vue、md-editor/CodeMirror、contenteditable。
+ */
+@media screen and (max-width: 768px) {
+  input:not([type='button']):not([type='submit']):not([type='reset']):not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']):not([type='color']):not([type='image']):not([type='hidden']),
+  textarea,
+  select,
+  [contenteditable='true'],
+  [contenteditable=''],
+  /* Ant Design Vue */
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-input-affix-wrapper > input.ant-input,
+  .ant-input-number,
+  .ant-input-number-input,
+  .ant-input-textarea textarea,
+  .ant-select-selection-search-input,
+  .ant-select-selection-item,
+  .ant-select-selection-placeholder,
+  .ant-picker-input > input,
+  .ant-mentions,
+  .ant-mentions > textarea,
+  .ant-cascader-input,
+  .ant-auto-complete .ant-select-selection-search-input,
+  /* md-editor-v3 / CodeMirror 6（文章/动态编辑器） */
+  .md-editor,
+  .md-editor-input,
+  .md-editor textarea,
+  .cm-editor,
+  .cm-content,
+  .cm-line,
+  .cm-scroller {
+    font-size: 16px !important;
+  }
+
+  .cm-content,
+  .cm-line {
+    line-height: 1.6 !important;
+  }
+}
+
+/* 搜索框 placeholder / 文字垂直居中（Ant Search 常见偏上问题） */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-search .ant-input,
+.ant-input-search .ant-input-affix-wrapper {
+  line-height: 1.5715 !important;
+}
+.ant-input-affix-wrapper {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 32px;
+}
+.ant-input-affix-wrapper > input.ant-input {
+  height: auto !important;
+  line-height: 1.5715 !important;
+  padding-top: 4px !important;
+  padding-bottom: 4px !important;
+}
+.ant-input-search > .ant-input-group > .ant-input-affix-wrapper:not(:last-child) {
+  align-items: center;
+}
+.ant-input::placeholder,
+.ant-input-affix-wrapper input::placeholder {
+  line-height: normal;
+  vertical-align: middle;
+}
+/* 数字输入等同理 */
+.ant-input-number,
+.ant-input-number-input {
+  line-height: 1.5715 !important;
+}
+.ant-input-number-input {
+  height: 30px !important;
+}
+
+/* ---------- 卡片：统一去边框线、加柔和阴影与圆角 ---------- */
+.admin-page,
+.table-page-search-wrapper,
+.comment-admin-page {
+  width: 100%;
+}
+.admin-page > .ant-card,
+.table-page-search-wrapper > .ant-card,
+.comment-admin-page > .ant-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f0f0f0;
+}
+.admin-page .ant-card-head,
+.table-page-search-wrapper .ant-card-head,
+.comment-admin-page .ant-card-head {
+  border-bottom: 1px solid #f0f0f0;
+}
+.admin-page .ant-card-head-title,
+.table-page-search-wrapper .ant-card-head-title,
+.comment-admin-page .ant-card-head-title {
+  font-weight: 600;
+  font-size: 16px;
+}
+
+/* ---------- 列表/表格 ---------- */
+.ant-table-wrapper {
+  width: 100%;
+}
+.ant-table-content,
+.ant-table-body {
+  overflow-x: auto !important;
+}
+/* 统一表格观感：表头浅底、内容垂直居中、行分隔更轻 */
+.ant-table-thead > tr > th {
+  background: #fafafa !important;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.ant-table-tbody > tr > td {
+  vertical-align: middle;
+}
+.ant-table-tbody > tr:hover > td {
+  background: #f5f8ff;
+}
+
+/* 操作列：链接/按钮统一为行内 flex，间距一致、不挤不换乱行 */
+.ant-table-tbody .ant-space {
+  flex-wrap: wrap;
+  row-gap: 4px;
+  column-gap: 12px;
+}
+.ant-table-tbody .ant-space-item > a {
+  white-space: nowrap;
+}
+.ant-table-tbody .ant-btn-link {
+  padding-left: 4px;
+  padding-right: 4px;
+}
+/* 表格内行内下拉框留出箭头空间，避免被列宽压住箭头 */
+.ant-table-tbody .ant-select {
+  min-width: 96px;
+}
+
+/* ---------- 页面工具栏（搜索 + 筛选 + 操作）---------- */
+/* 卡片右上角 extra 工具栏与 inline 表单统一对齐到一条基线，控件等高 */
+.ant-card-extra .ant-space {
+  align-items: center;
+  row-gap: 8px;
+}
+.ant-card-extra .ant-space-item {
+  display: flex;
+  align-items: center;
+}
+.ant-form-inline {
+  row-gap: 8px;
+  align-items: flex-end;
+}
+.ant-form-inline .ant-form-item {
+  margin-bottom: 8px;
+}
+/* 统一控件高度，按钮/输入框/下拉框对齐 */
+.ant-card-extra .ant-btn,
+.ant-card-extra .ant-input-affix-wrapper,
+.ant-card-extra .ant-input,
+.ant-card-extra .ant-select-selector,
+.comment-admin-page .ant-btn,
+.comment-admin-page .ant-input-number,
+.comment-admin-page .ant-select-selector {
+  height: 32px;
+}
+.ant-card-extra .ant-radio-button-wrapper {
+  height: 32px;
+  line-height: 30px;
+}
+/* 下拉框/输入框最小宽度，避免被压成一条缝 */
+.ant-select,
+.ant-picker {
+  min-width: 120px;
+}
+
+/* ---------- 标签页（顶部 Tabs）美化：把 editable-card 调成扁平胶囊风 ---------- */
+.tabs .ant-tabs-nav {
+  margin: 0;
+}
+.tabs .ant-tabs-nav::before {
+  border-bottom: none !important;
+}
+.tabs .ant-tabs-tab {
+  border-radius: 8px !important;
+  border: 1px solid #eef0f5 !important;
+  background: #f7f8fa !important;
+  margin: 0 6px 0 0 !important;
+  padding: 4px 12px !important;
+  transition: all 0.2s ease;
+}
+.tabs .ant-tabs-tab:hover {
+  color: #2f54eb;
+}
+.tabs .ant-tabs-tab-active {
+  background: #eaf0ff !important;
+  border-color: #2f54eb !important;
+}
+.tabs .ant-tabs-tab-active .ant-tabs-tab-btn {
+  color: #2f54eb !important;
+  font-weight: 600;
+}
+/* 工作台标签（不可关闭）：隐藏其残留的关闭占位，避免出现「工作台 x」的视觉 */
+.tabs .ant-tabs-tab .ant-tabs-tab-remove {
+  margin-left: 6px;
+}
+
+/* ---------- 窄屏适配 ---------- */
+@media (max-width: 992px) {
+  .tabs .ant-tabs-tab {
+    padding: 3px 10px !important;
+    font-size: 13px;
+  }
+}
+@media (max-width: 768px) {
+  /* 卡片内边距收紧 */
+  .ant-card-body {
+    padding: 12px;
+  }
+  .admin-page .ant-card-head,
+  .table-page-search-wrapper .ant-card-head,
+  .comment-admin-page .ant-card-head {
+    padding: 0 12px;
+  }
+  /* extra 工具栏整体竖排，控件占满一行更易点 */
+  .ant-card-extra {
+    width: 100%;
+  }
+  .ant-card-head {
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: 8px;
+  }
+  .ant-card-extra .ant-space {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .ant-card-extra .ant-space-item,
+  .ant-card-extra .ant-input-search,
+  .ant-card-extra .ant-radio-group {
+    width: 100%;
+    min-width: 0;
+  }
+  /* inline 筛选表单竖排 */
+  .ant-form-inline {
+    width: 100%;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ant-form-inline .ant-form-item {
+    display: block;
+    margin-right: 0;
+    margin-bottom: 12px;
+    width: 100%;
+  }
+  .ant-form-inline .ant-form-item-row {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ant-form-inline .ant-form-item-label {
+    max-width: 100%;
+    padding: 0 0 4px;
+    text-align: left;
+  }
+  .ant-form-inline .ant-form-item-label > label {
+    height: auto;
+    white-space: normal;
+  }
+  .ant-form-inline .ant-form-item .ant-form-item-control {
+    width: 100%;
+    max-width: 100%;
+    flex: 0 0 auto;
+  }
+  .ant-form-inline .ant-form-item-control-input,
+  .ant-form-inline .ant-form-item-control-input-content {
+    width: 100%;
+    max-width: 100%;
+  }
+  .ant-form-inline .ant-form-item-control-input-content > .ant-space {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+  .ant-form-inline .ant-form-item-control-input-content > .ant-space .ant-space-item {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+  .ant-form-inline .ant-form-item-control-input-content > .ant-space .ant-btn {
+    width: 100%;
+  }
+  .ant-select,
+  .ant-picker,
+  .ant-input,
+  .ant-input-number,
+  .ant-input-affix-wrapper,
+  .ant-input-group-wrapper,
+  .ant-input-search {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: 100%;
+  }
+  /* 分页在小屏简化 */
+  .ant-pagination-options {
+    display: none;
+  }
+  /* 弹窗在小屏接近全宽 */
+  .ant-modal {
+    top: 8px;
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px);
+    margin: 8px auto;
+  }
+  .ant-modal-content {
+    max-height: calc(100vh - 16px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .ant-modal-body {
+    overflow-y: auto;
+    max-height: calc(100vh - 148px);
+    padding: 16px 12px;
+  }
+  .ant-modal-footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+  .ant-modal-footer .ant-btn {
+    margin-inline-start: 0 !important;
+  }
+  .ant-form:not(.ant-form-inline):not(.ant-form-vertical) .ant-form-item-row {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ant-form:not(.ant-form-inline):not(.ant-form-vertical) .ant-form-item-label {
+    max-width: 100%;
+    padding: 0 0 4px;
+    text-align: left;
+  }
+  .ant-form:not(.ant-form-inline):not(.ant-form-vertical) .ant-form-item-label > label {
+    height: auto;
+    white-space: normal;
+  }
+  .ant-form:not(.ant-form-inline):not(.ant-form-vertical) .ant-form-item-control {
+    width: 100%;
+    max-width: 100%;
+    flex: 0 0 auto;
+  }
+  .table-operator {
+    flex-wrap: wrap;
+  }
+  .table-operator .ant-btn {
+    min-width: 120px;
+  }
+}
+
+/* ===================================================================
+   以下为「全部列表统一美化 + 输入框背景 + 溢出修复」增强
+   =================================================================== */
+
+/* ---------- 覆盖 Tag/Category/Role 等 xxx-container 容器 ---------- */
+/* 这些页面自带一层 #f0f2f5 灰底 + 内层卡片，与主工作区灰底叠加显得脏，统一去掉自带灰底 */
+.tag-container,
+.category-container,
+.role-container {
+  background-color: transparent !important;
+  padding: 0 !important;
+}
+/* 统一这些容器内卡片风格与 admin-page 一致 */
+.tag-container > .ant-card,
+.category-container > .ant-card,
+.role-container > .ant-card {
+  border-radius: 12px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04), 0 4px 16px rgba(0, 0, 0, 0.04);
+  border: 1px solid #f0f0f0;
+}
+
+/* ---------- 表格统一：所有列表表格一致的边框/圆角/斑马/对齐 ---------- */
+.ant-table-wrapper .ant-table {
+  border-radius: 10px;
+}
+/* 统一表头样式（含已 bordered 与未 bordered 的表格） */
+.ant-table-thead > tr > th {
+  color: #1f2733 !important;
+  border-bottom: 1px solid #eef0f5 !important;
+}
+/* 行高与单元格内边距统一，观感更舒展 */
+.ant-table-tbody > tr > td {
+  padding-top: 12px !important;
+  padding-bottom: 12px !important;
+}
+/* 次要说明文字（slug、@username、ID 等）统一弱化 */
+.ant-table .muted,
+.ant-table-tbody .muted {
+  color: rgba(0, 0, 0, 0.4);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+/* ---------- 操作列按钮统一为「描边胶囊」风，明确可点、对齐整齐 ---------- */
+/* 把表格里裸 <a> 操作链接做成统一的小按钮观感 */
+.ant-table-tbody td .ant-space-item > a:not(.ant-btn),
+.ant-table-tbody td > a:not(.ant-btn) {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 0 10px;
+  font-size: 13px;
+  line-height: 24px;
+  border: 1px solid #d6e0f5;
+  border-radius: 6px;
+  color: #2f54eb;
+  background: #f5f8ff;
+  transition: all 0.18s ease;
+}
+.ant-table-tbody td .ant-space-item > a:not(.ant-btn):hover,
+.ant-table-tbody td > a:not(.ant-btn):hover {
+  border-color: #2f54eb;
+  background: #2f54eb;
+  color: #fff;
+}
+/* 危险操作（删除/彻底删除）统一红色描边胶囊 */
+.ant-table-tbody td a.danger-link,
+.ant-table-tbody td a.text-danger {
+  border-color: #ffd2d2 !important;
+  background: #fff5f5 !important;
+  color: #ff4d4f !important;
+}
+.ant-table-tbody td a.danger-link:hover,
+.ant-table-tbody td a.text-danger:hover {
+  border-color: #ff4d4f !important;
+  background: #ff4d4f !important;
+  color: #fff !important;
+}
+/* 操作列里如果用了竖向分隔符，与胶囊按钮重复，隐藏它 */
+.ant-table-tbody td .ant-divider-vertical {
+  display: none;
+}
+
+/* ---------- 行内下拉框/开关：明确为可选择控件 ---------- */
+.ant-table-tbody .ant-select .ant-select-selector {
+  border-radius: 6px;
+}
+.ant-table-tbody .ant-select-selector:hover {
+  border-color: #2f54eb;
+}
+
+/* ---------- 全局输入类控件：浅灰底 + 聚焦高亮，与白卡片区分清晰 ---------- */
+/* 解决「白底输入框嵌在白/灰卡片里看不清边界」：统一给一个极浅灰底，聚焦转白 */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number,
+.ant-input-number-input,
+.ant-picker,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector,
+.ant-textarea,
+textarea.ant-input {
+  background-color: #f7f9fc !important;
+  border-color: #e4e9f2 !important;
+}
+.ant-input:focus,
+.ant-input-focused,
+.ant-input-affix-wrapper:focus,
+.ant-input-affix-wrapper-focused,
+.ant-input-number-focused,
+.ant-picker-focused,
+.ant-select-focused:not(.ant-select-customize-input) .ant-select-selector,
+.ant-input:hover,
+.ant-input-affix-wrapper:hover,
+.ant-select:not(.ant-select-customize-input) .ant-select-selector:hover {
+  background-color: #fff !important;
+  border-color: #2f54eb !important;
+}
+/* 搜索框内嵌按钮区域保持白底，避免与输入底色割裂 */
+.ant-input-search .ant-input-group-addon {
+  background: transparent !important;
+}
+
+/* ---------- 768~992 中等屏：固定像素宽的搜索/筛选控件不溢出 ---------- */
+@media (max-width: 1100px) {
+  /* 工具栏里所有固定宽输入/选择，最大不超过容器，避免横向溢出屏幕 */
+  .ant-card-extra .ant-input-search,
+  .ant-card-extra .ant-select,
+  .ant-card-extra .ant-input,
+  .ant-form-inline .ant-input,
+  .ant-form-inline .ant-select,
+  .ant-form-inline .ant-input-number {
+    max-width: 100%;
+  }
+}
+
+/* ===================================================================
+   横向溢出根治 + 输入框文字溢出修复 + 编辑器自适应
+   =================================================================== */
+
+/* ---------- 1. 整页横向溢出根治 ---------- */
+/* 内容滚动容器只允许纵向滚动；任何子项的固有宽度都不得撑破视口横向 */
+.main .main-container {
+  overflow-x: hidden;
+}
+/* 各页面根容器与卡片本体允许收缩(min-width:0)，否则栅格/弹性子项会以内容固有宽度撑开父级 */
+.admin-page,
+.table-page-search-wrapper,
+.comment-admin-page,
+.tag-container,
+.category-container,
+.role-container {
+  min-width: 0;
+  max-width: 100%;
+}
+.admin-page > .ant-card,
+.table-page-search-wrapper > .ant-card,
+.comment-admin-page > .ant-card,
+.ant-card-body,
+.ant-form-item-control,
+.ant-form-item-control-input,
+.ant-row {
+  min-width: 0;
+}
+/* 表单项内输入/选择默认占满控件区（覆盖页面内联固定宽度） */
+.ant-form-vertical .ant-form-item .ant-input,
+.ant-form-vertical .ant-form-item .ant-input-affix-wrapper,
+.ant-form-vertical .ant-form-item .ant-input-number,
+.ant-form-vertical .ant-form-item .ant-picker,
+.ant-form-vertical .ant-form-item .ant-select {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* ---------- 2. 输入框文字溢出背景修复 ---------- */
+/* affix-wrapper(带前后缀/清除/搜索图标的输入框)内部真正的 <input> 必须透明且无边框，
+   否则它自带白底会盖在 wrapper 的浅灰底之上、并因高度不齐使文字看起来超出背景框。 */
+.ant-input-affix-wrapper > input.ant-input,
+.ant-input-affix-wrapper > textarea.ant-input,
+.ant-input-search .ant-input {
+  background-color: transparent !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+/* 文本类控件统一 box-sizing 与行高，文字垂直居中、不溢出可视背景 */
+.ant-input,
+.ant-input-affix-wrapper,
+.ant-input-number-input,
+textarea.ant-input {
+  box-sizing: border-box;
+  line-height: 1.5715;
+}
+/* 单行输入类控件文字/占位符左对齐 */
+.ant-input:not(textarea),
+.ant-input-affix-wrapper > input.ant-input,
+.ant-input-number-input,
+.ant-picker-input > input,
+.ant-select-single .ant-select-selector .ant-select-selection-item,
+.ant-select-single .ant-select-selector .ant-select-selection-placeholder,
+.ant-select-single .ant-select-selector .ant-select-selection-search-input {
+  text-align: left !important;
+}
+.ant-input::placeholder,
+.ant-input-affix-wrapper > input.ant-input::placeholder,
+.ant-input-number-input::placeholder,
+.ant-picker-input > input::placeholder {
+  text-align: left;
+}
+textarea.ant-input,
+.ant-input-affix-wrapper > textarea.ant-input {
+  text-align: left !important;
+}
+textarea.ant-input::placeholder,
+.ant-input-affix-wrapper > textarea.ant-input::placeholder {
+  text-align: left;
+}
+/* 单行输入/搜索框过长文字省略而非撑破布局 */
+.ant-input-affix-wrapper > input.ant-input {
+  text-overflow: ellipsis;
+}
+/* 搜索框内部使用弹性布局，防止输入区在窄屏被搜索按钮挤没。 */
+.ant-input-search,
+.ant-input-group-wrapper {
+  max-width: 100%;
+}
+.ant-input-search .ant-input-wrapper.ant-input-group {
+  width: 100%;
+  display: flex;
+}
+.ant-input-search .ant-input-wrapper.ant-input-group > .ant-input,
+.ant-input-search .ant-input-wrapper.ant-input-group > .ant-input-affix-wrapper {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.ant-input-search .ant-input-group-addon {
+  width: auto;
+  flex: 0 0 auto;
+}
+.ant-input-search .ant-input-group-addon .ant-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+/* 多选下拉(标签模式)高度自适应，选项多时换行而非把文字顶出背景 */
+.ant-select-multiple .ant-select-selector {
+  height: auto !important;
+  min-height: 32px;
+}
+
+/* ---------- 3. 富文本编辑器(md-editor-v3)自适应 ---------- */
+/* 编辑器根容器随父级收缩；其工具栏自带 overflow-x:auto，min-width:0 后即可横向滚动而非溢出。 */
+.md-editor {
+  max-width: 100%;
+  min-width: 0;
+}
+.md-editor .md-editor-toolbar-wrapper {
+  max-width: 100%;
+}
+@media (max-width: 768px) {
+  /* 窄屏编辑器：若处于编辑+预览分屏，强制单栏(仅编辑区)避免左右挤压溢出；
+     预览通过工具栏的「预览」按钮切换。内容区与预览区各自占满宽度。 */
+  .md-editor .md-editor-content-wrapper {
+    width: 100%;
+    min-width: 0;
+  }
+  .md-editor .md-editor-content,
+  .md-editor .md-editor-input-wrapper,
+  .md-editor .md-editor-preview-wrapper {
+    min-width: 0;
+    max-width: 100%;
+  }
+  .md-editor .md-editor-preview {
+    padding-inline: 12px;
+  }
+  .md-editor .md-editor-resize-operate {
+    display: none !important;
+  }
+  .md-editor-modal-container .md-editor-modal {
+    width: calc(100vw - 24px) !important;
+    max-width: calc(100vw - 24px) !important;
+    max-height: calc(100vh - 16px) !important;
+    height: auto !important;
+    inset-inline-start: 12px !important;
+    inset-inline-end: 12px !important;
+    inset-block-start: 8px !important;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  .md-editor-modal-container .md-editor-modal-header {
+    flex: 0 0 auto;
+    padding-block: 10px;
+    padding-inline: 14px 72px;
+  }
+  .md-editor-modal-container .md-editor-modal-body {
+    flex: 1 1 auto;
+    height: auto !important;
+    max-height: calc(100vh - 62px);
+    padding-block: 12px;
+    padding-inline: 12px;
+    overflow-y: auto;
+  }
+  .md-editor-dropdown {
+    max-width: calc(100vw - 24px);
+  }
+}
+
+/* ===================================================================
+   4. 弹窗 & 全局 message/notification 不溢出视口
+   =================================================================== */
+/* 弹窗宽度不超过视口（min() 与页面内联 width 取小） */
+.ant-modal {
+  max-width: calc(100vw - 32px);
+}
+.ant-modal .md-editor {
+  max-width: 100%;
+  min-width: 0;
+}
+/* 全局轻提示：整体限宽 + 长文本换行，避免提示框飘到窗口外被裁切 */
+.ant-message {
+  width: 100%;
+}
+.ant-message .ant-message-notice-content {
+  max-width: calc(100vw - 24px);
+  word-break: break-word;
+}
+/* 通知（右上角）：限宽 + 换行，窄屏不超出视口 */
+.ant-notification {
+  max-width: calc(100vw - 24px);
+}
+.ant-notification .ant-notification-notice {
+  max-width: 100% !important;
+  word-break: break-word;
+}
+
+/* 编辑器预览：图片组（:::bd-gallery）九宫格展示，与前台一致 */
+.bd-block--gallery {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin: 12px 0;
+}
+.bd-block--gallery p {
+  display: contents;
+  margin: 0;
+}
+.bd-block--gallery img {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  border-radius: 8px;
+  margin: 0 !important;
+}

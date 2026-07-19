@@ -1,0 +1,101 @@
+<view class="page me-page">
+  <view class="me-banner">
+    <view class="me-banner__deco"></view>
+    <view class="me-banner__deco2"></view>
+  </view>
+
+  <view class="me-profile">
+    <block wx:if="{{isLoggedIn}}">
+      <image class="me-profile__avatar" mode="aspectFill" src="{{avatarUrl}}" />
+      <view class="me-profile__info">
+        <view class="me-profile__name">{{profile.displayName || session.displayName || session.username}}</view>
+        <view class="me-profile__sub">@{{session.username}}{{session.roleCode ? ' · ' + session.roleCode : ''}}</view>
+      </view>
+      <button class="danger-button me-profile__btn" bindtap="confirmLogout">退出</button>
+    </block>
+    <block wx:else>
+      <image class="me-profile__avatar" mode="aspectFill" src="{{profileAvatar}}" />
+      <view class="me-profile__info">
+        <view class="me-profile__name">{{profileName}}</view>
+        <view class="me-profile__sub">{{profileBio || siteName}}</view>
+      </view>
+      <button class="primary-button me-profile__btn" bindtap="goLogin">登录</button>
+    </block>
+  </view>
+
+  <view class="me-body">
+    <block wx:if="{{!isLoggedIn}}">
+      <view class="me-panel">
+        <view class="me-panel__title">欢迎来到 {{siteName}}</view>
+        <view class="me-panel__desc">登录后可同步收藏、点赞与评论记录。</view>
+        <button class="primary-button me-panel__btn" bindtap="goLogin">去登录</button>
+      </view>
+
+      <view class="me-menu">
+        <view class="me-menu__item" bindtap="goArticles">
+          <view class="me-menu__dot"></view>
+          <view class="me-menu__label">浏览文章</view>
+          <view class="me-menu__arrow">›</view>
+        </view>
+        <view class="me-menu__item" bindtap="goDynamics">
+          <view class="me-menu__dot me-menu__dot--sky"></view>
+          <view class="me-menu__label">查看动态</view>
+          <view class="me-menu__arrow">›</view>
+        </view>
+      </view>
+    </block>
+
+    <block wx:else>
+      <view class="me-stats">
+        <view class="me-stat">
+          <view class="me-stat__num">{{profile.favoriteCount || 0}}</view>
+          <view class="me-stat__label">收藏</view>
+        </view>
+        <view wx:if="{{commentsEnabled}}" class="me-stat">
+          <view class="me-stat__num">{{profile.commentCount || 0}}</view>
+          <view class="me-stat__label">评论</view>
+        </view>
+        <view class="me-stat">
+          <view class="me-stat__num">{{profile.articleLikeCount || 0}}</view>
+          <view class="me-stat__label">点赞</view>
+        </view>
+      </view>
+
+      <view class="section-title">我的收藏</view>
+      <view wx:if="{{!favorites.length}}" class="empty-state">还没有收藏文章。</view>
+      <view wx:else class="fav-list">
+        <view
+          wx:for="{{favorites}}"
+          wx:key="id"
+          class="fav-card"
+          data-id="{{item.id}}"
+          bindtap="goDetail"
+        >
+          <image class="fav-card__cover" mode="aspectFill" src="{{item.coverUrl}}" />
+          <view class="fav-card__body">
+            <view class="fav-card__title">{{item.title}}</view>
+            <view class="fav-card__meta">{{item.categoryName || '未分类'}} · {{item.displayTime}}</view>
+          </view>
+        </view>
+      </view>
+
+      <block wx:if="{{commentsEnabled}}">
+        <view class="section-title">我的评论</view>
+        <view wx:if="{{!comments.length}}" class="empty-state">还没有发布评论。</view>
+        <view wx:else class="cmt-list">
+          <view
+            wx:for="{{comments}}"
+            wx:key="id"
+            class="cmt-card"
+            data-id="{{item.articleId}}"
+            bindtap="goDetail"
+          >
+            <view class="cmt-card__article">{{item.articleTitle}}</view>
+            <view class="cmt-card__content">{{item.content}}</view>
+            <view class="cmt-card__meta">{{item.displayTime}} · 赞 {{item.likeCount}}</view>
+          </view>
+        </view>
+      </block>
+    </block>
+  </view>
+</view>

@@ -1,0 +1,39 @@
+<view class="page search-page">
+  <view class="home-search-wrap">
+    <view class="home-search">
+      <view class="ic ic-search home-search__icon"></view>
+      <input
+        class="home-search__input"
+        value="{{keywordInput}}"
+        placeholder="搜索文章"
+        confirm-type="search"
+        focus
+        bindinput="onKeywordInput"
+        bindconfirm="submitSearch"
+      />
+      <view wx:if="{{keywordInput}}" class="ic ic-close ic--sm home-search__clear" bindtap="clearKeyword"></view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && !articles.length}}" class="empty-state">搜索中…</view>
+  <view wx:elif="{{keyword && !articles.length && !loading}}" class="empty-state">没有匹配的文章</view>
+
+  <view class="article-list">
+    <view
+      wx:for="{{articles}}"
+      wx:key="id"
+      class="article-card surface"
+      data-id="{{item.id}}"
+      bindtap="openArticle"
+    >
+      <image class="article-card__cover" mode="aspectFill" src="{{item.coverUrl}}" />
+      <view class="article-card__body">
+        <view class="article-card__title">{{item.title}}</view>
+        <view class="article-card__summary">{{item.summary}}</view>
+      </view>
+    </view>
+  </view>
+
+  <view wx:if="{{loading && articles.length}}" class="empty-state">加载更多…</view>
+  <view wx:elif="{{finished && articles.length}}" class="empty-state">没有更多了</view>
+</view>

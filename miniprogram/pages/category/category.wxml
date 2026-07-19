@@ -1,0 +1,39 @@
+<view class="page category-page">
+  <scroll-view class="cat-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+    <view class="cat-scroll__inner">
+      <view
+        class="cat-chip {{!slug ? 'cat-chip--on' : ''}}"
+        data-slug=""
+        data-name="全部分类"
+        bindtap="selectCategory"
+      >全部</view>
+      <view
+        wx:for="{{categories}}"
+        wx:key="slug"
+        class="cat-chip {{slug === item.slug ? 'cat-chip--on' : ''}}"
+        data-slug="{{item.slug}}"
+        data-name="{{item.name}}"
+        bindtap="selectCategory"
+      >{{item.name}}</view>
+    </view>
+  </scroll-view>
+
+  <view wx:if="{{loading && !articles.length}}" class="empty-state">加载中…</view>
+  <view wx:elif="{{!articles.length && !loading}}" class="empty-state">该分类暂无文章</view>
+
+  <view class="article-list">
+    <view
+      wx:for="{{articles}}"
+      wx:key="id"
+      class="article-card surface"
+      data-id="{{item.id}}"
+      bindtap="openArticle"
+    >
+      <image class="article-card__cover" mode="aspectFill" src="{{item.coverUrl}}" />
+      <view class="article-card__body">
+        <view class="article-card__title">{{item.title}}</view>
+        <view class="article-card__summary">{{item.summary}}</view>
+      </view>
+    </view>
+  </view>
+</view>

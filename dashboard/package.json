@@ -1,0 +1,30 @@
+{
+  "name": "blog-dashboard",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@ant-design/icons-vue": "^7.0.1",
+    "@vicons/material": "^0.13.0",
+    "@vicons/utils": "^0.1.4",
+    "ant-design-vue": "^4.2.6",
+    "axios": "^1.16.1",
+    "cropperjs": "^1.6.2",
+    "md-editor-v3": "^6.5.1",
+    "pinia": "^3.0.4",
+    "pinia-plugin-persistedstate": "^4.7.1",
+    "sass": "^1.100.0",
+    "unplugin-vue-components": "^32.1.0",
+    "vue": "^3.5.34",
+    "vue-router": "^5.0.7"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.7",
+    "vite": "^8.0.14"
+  }
+}
