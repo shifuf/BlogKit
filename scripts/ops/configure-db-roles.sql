@@ -6,9 +6,8 @@
 \getenv migration_password DB_MIGRATION_PASSWORD
 \getenv backup_user BLOG_BACKUP_DB_USERNAME
 \getenv backup_password BLOG_BACKUP_DB_PASSWORD
-SELECT 'business, migration and backup roles must be distinct from administrator' AS error
- WHERE :'app_user'=current_user OR :'migration_user'=current_user OR :'backup_user'=current_user OR :'app_user'=:'migration_user' OR :'app_user'=:'backup_user' OR :'migration_user'=:'backup_user' \gset
-\if :{?error}
+SELECT (:'app_user'=current_user OR :'migration_user'=current_user OR :'backup_user'=current_user OR :'app_user'=:'migration_user' OR :'app_user'=:'backup_user' OR :'migration_user'=:'backup_user') AS invalid_roles \gset
+\if :invalid_roles
  \echo Role separation validation failed
  \quit 3
 \endif
