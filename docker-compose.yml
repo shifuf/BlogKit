@@ -43,7 +43,7 @@ services:
     volumes:
       - redis-data:/data
       - ./scripts/ops/start-redis.sh:/opt/blog-ops/start-redis.sh:ro
-    tmpfs: [/tmp:size=1m,mode=1777]
+    tmpfs: ["/tmp:size=1m,mode=1777"]
     mem_limit: ${REDIS_MEMORY_LIMIT:-96m}
     cpus: "0.25"
     healthcheck:
@@ -130,7 +130,7 @@ services:
     mem_limit: ${BACKEND_MEMORY_LIMIT:-512m}
     cpus: ${BACKEND_CPUS:-0.75}
     read_only: true
-    tmpfs: [/tmp:size=32m,mode=1777]
+    tmpfs: ["/tmp:size=32m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     logging: *bounded-logs
@@ -170,7 +170,7 @@ services:
     mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
     cpus: ${FRONTEND_CPUS:-0.5}
     read_only: true
-    tmpfs: [/tmp:size=16m,mode=1777]
+    tmpfs: ["/tmp:size=16m,mode=1777"]
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     logging: *bounded-logs

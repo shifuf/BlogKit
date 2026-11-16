@@ -91,7 +91,9 @@ def backup(root,args):
     finally:
         for name in ("database.dump","uploads.tar"):
             if stage.exists(): (stage/name).unlink(missing_ok=True)
-        compose(root,"start","backend")
+        # Start the existing container without applying new dependency health rules
+        # during a pre-upgrade backup. Compose start may otherwise leave it stopped.
+        run(["docker","start",config.get("BACKEND_CONTAINER_NAME","blog-backend")])
 
 def drill(root,args):
     directory=safe_child(root,args.backup)

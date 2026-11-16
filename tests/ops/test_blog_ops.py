@@ -13,9 +13,13 @@ class OpsTests(unittest.TestCase):
             def docker(_root,*args,**kw):
                 actions.append(args)
                 if kw.get("stdout"):kw["stdout"].write(b"private-data")
-            with patch.object(ops,"compose",docker),patch.object(ops,"run",side_effect=RuntimeError("encryption failed")):
+            def command(args,**kw):
+                if args[:2]==['docker','start']:
+                    actions.append(tuple(args));return b''
+                raise RuntimeError("encryption failed")
+            with patch.object(ops,"compose",docker),patch.object(ops,"run",side_effect=command):
                 with self.assertRaises(RuntimeError):ops.backup(root,types.SimpleNamespace(secret_file="secrets/key",keep=2,offsite="",initial_admin=False))
-            self.assertEqual(actions[0],("stop","backend"));self.assertEqual(actions[-1],("start","backend"))
+            self.assertEqual(actions[0],("stop","backend"));self.assertEqual(actions[-1],("docker","start","blog-backend"))
             self.assertEqual(list(root.glob("backups/**/database.dump")),[])
             self.assertEqual(list(root.glob("backups/**/uploads.tar")),[])
     def test_manifest_authentication_rejects_changed_metadata(self):
