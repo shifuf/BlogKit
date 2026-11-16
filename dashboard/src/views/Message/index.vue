@@ -128,7 +128,7 @@
                 <a v-if="record.status !== 'SPAM'" class="danger-link" @click="spamComment(record)">垃圾</a>
                 <a v-if="!record.parentId && !record.pinned" @click="pinComment(record)">置顶</a>
                 <a v-if="!record.parentId && record.pinned" @click="unpinComment(record)">取消置顶</a>
-                <a @click="viewReplies(record)">{{ record.parentId ? '查看上下文' : '回复' }}</a>
+                <a @click="viewReplies(record)">{{ record.parentId ? '查看上下文' : '查看回复' }}</a>
               </template>
               <a-popconfirm title="确认删除该评论？回复也会一并删除。" @confirm="removeComment(record)">
                 <a class="danger-link">删除</a>
@@ -139,13 +139,17 @@
       </a-table>
     </a-card>
 
-    <a-modal v-model:open="replyVisible" title="管理员回复" width="760px" :footer="null" destroy-on-close>
+    <a-modal v-model:open="replyVisible" title="评论上下文与回复" width="760px" :footer="null" destroy-on-close>
       <a-comment v-if="currentComment">
         <template #author>{{ currentComment.authorName }}</template>
         <template #avatar>
           <a-avatar>{{ currentComment.authorName?.charAt(0) }}</a-avatar>
         </template>
         <template #content>
+          <blockquote v-if="currentComment.parentId" class="reply-context">
+            回复 @{{ currentComment.replyTo || '原评论作者' }}
+            <p>{{ currentComment.replyToContent || '原评论已不可用' }}</p>
+          </blockquote>
           <p>{{ currentComment.content }}</p>
         </template>
         <template #datetime>{{ formatDateTime(currentComment.createdAt) }}</template>
@@ -160,7 +164,7 @@
           placeholder="以管理员身份回复该评论（发布后自动通过）"
         />
         <div class="admin-reply-box__actions">
-          <a-button type="primary" :loading="adminReplyLoading" :disabled="!adminReplyContent.trim()" @click="submitAdminReply">
+          <a-button type="primary" :loading="adminReplyLoading" :disabled="!String(adminReplyContent ?? '').trim()" @click="submitAdminReply">
             发布回复
           </a-button>
         </div>
@@ -209,7 +213,7 @@
 </template>
 
 <script setup>
-import { computed, reactive, ref, onMounted } from 'vue';
+import { computed, reactive, ref, onMounted, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import {
   approveMessage, deleteMessage, getMessageList, rejectMessage, batchDeleteMessages,
@@ -290,6 +294,13 @@ const replyList = ref([]);
 const replyPage = ref(1);
 const replyTotal = ref(0);
 const replyLoading = ref(false);
+const adminReplyContent = ref('');
+const adminReplyLoading = ref(false);
+let replyRequestId = 0;
+let replyContextId = 0;
+watch(replyVisible, visible => {
+  if (!visible) { replyRequestId += 1; replyContextId += 1; replyLoading.value = false; }
+});
 const getList = async () => {
   loading.value = true;
   selectedRowKeys.value = [];
@@ -384,20 +395,52 @@ const handleBatchStatus = async status => {
   await getList();
 };
 const viewReplies = async record => {
+  replyContextId += 1;
+  adminReplyContent.value = '';
+  replyList.value = [];
+  replyTotal.value = 0;
   currentComment.value = record;
   replyVisible.value = true;
   await loadReplies(record);
 };
 const loadReplies = async (record, append = false) => {
+  if (!record || (append && replyLoading.value)) return;
+  const requestId = ++replyRequestId;
+  const selectedId = record.id;
   if (!append) replyPage.value = 1;
+  const pageNumber = replyPage.value;
   replyLoading.value = true;
   try {
-    const page = await getMessageList({ pageNum: replyPage.value, pageSize: 20, parentId: record.parentId || record.id });
-    replyList.value = append ? [...replyList.value, ...page.items] : page.items;
+    const page = await getMessageList({ pageNum: pageNumber, pageSize: 20, parentId: record.parentId || record.id });
+    if (requestId !== replyRequestId || !replyVisible.value || currentComment.value?.id !== selectedId) return;
+    replyList.value = append ? [...replyList.value, ...(page.items || [])] : (page.items || []);
     replyTotal.value = page.totalItems || 0;
-    replyPage.value += 1;
+    replyPage.value = pageNumber + 1;
+  } catch (error) {
+    if (requestId === replyRequestId) message.error(error?.message || '回复加载失败，请重试');
   } finally {
-    replyLoading.value = false;
+    if (requestId === replyRequestId) replyLoading.value = false;
+  }
+};
+const submitAdminReply = async () => {
+  const target = currentComment.value;
+  const draft = String(adminReplyContent.value ?? '');
+  const content = draft.trim();
+  if (!target || !content || adminReplyLoading.value) return;
+  const contextId = replyContextId;
+  adminReplyLoading.value = true;
+  try {
+    await replyMessage(target.id, content);
+    message.success('回复已发布');
+    if (replyVisible.value && replyContextId === contextId && currentComment.value?.id === target.id) {
+      if (adminReplyContent.value === draft) adminReplyContent.value = '';
+      await loadReplies(target);
+    }
+    await getList();
+  } catch (error) {
+    message.error(error?.message || '回复发布失败');
+  } finally {
+    adminReplyLoading.value = false;
   }
 };
 const removeComment = async record => {
@@ -556,4 +599,15 @@ a.article-title-link {
 .danger-link {
   color: #ff4d4f;
 }
+
+.reply-context {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 3px solid #1677ff;
+  background: #f5f7fa;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reply-context p { margin: 4px 0 0; }
+.admin-reply-box__actions { margin-top: 12px; text-align: right; }
 </style>

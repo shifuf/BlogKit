@@ -3,25 +3,28 @@
     <a-card :bordered="false">
       <template #title>文章管理</template>
       <template #extra>
-        <a-space wrap>
+        <a-button v-if="listMode === 'active'" type="primary" @click="createArticle">新建文章</a-button>
+      </template>
+      <div class="article-toolbar">
+        <div class="article-toolbar__filters">
           <a-input-search
             v-model:value="keywordInput"
             allow-clear
             placeholder="搜索标题、摘要、标签、作者"
-            style="width: 260px"
+            class="article-toolbar__search"
             @search="searchArticles"
           />
-          <a-select v-model:value="statusFilter" allow-clear placeholder="状态筛选" style="width: 140px" @change="reload">
+          <a-select v-model:value="statusFilter" allow-clear placeholder="状态筛选" class="article-toolbar__select" @change="reload">
             <a-select-option v-for="item in statusOptions" :key="item.value" :value="item.value">{{ item.label }}</a-select-option>
           </a-select>
-          <a-select v-model:value="visibilityFilter" allow-clear placeholder="可见性" style="width: 130px" @change="reload">
+          <a-select v-model:value="visibilityFilter" allow-clear placeholder="可见性" class="article-toolbar__select" @change="reload">
             <a-select-option value="PUBLIC">公开</a-select-option>
             <a-select-option value="LOGIN">登录可见</a-select-option>
             <a-select-option value="PASSWORD">密码可见</a-select-option>
             <a-select-option value="PRIVATE">指定用户</a-select-option>
             <a-select-option value="UNLISTED">隐藏(直链)</a-select-option>
           </a-select>
-          <a-select v-model:value="stickyFilter" allow-clear placeholder="置顶" style="width: 100px" @change="reload">
+          <a-select v-model:value="stickyFilter" allow-clear placeholder="置顶" class="article-toolbar__select" @change="reload">
             <a-select-option :value="true">仅置顶</a-select-option>
             <a-select-option :value="false">非置顶</a-select-option>
           </a-select>
@@ -30,6 +33,8 @@
             <a-radio-button value="deleted">回收站</a-radio-button>
           </a-radio-group>
           <a-button @click="resetFilters">重置</a-button>
+        </div>
+        <div class="article-toolbar__actions">
           <a-dropdown :disabled="!selectedRowKeys.length || listMode !== 'active'">
             <a-button :disabled="!selectedRowKeys.length || listMode !== 'active'">批量改状态/可见性</a-button>
             <template #overlay>
@@ -50,9 +55,8 @@
           <a-button :disabled="!selectedRowKeys.length" :loading="exporting" @click="exportSelected">导出 Markdown</a-button>
           <a-button :disabled="!selectedRowKeys.length" :loading="scanning" @click="scanSelectedLinks">扫描坏链</a-button>
           <a-button v-if="listMode === 'active'" @click="openStickyOrder">置顶排序</a-button>
-          <a-button v-if="listMode === 'active'" type="primary" @click="createArticle">新建文章</a-button>
-        </a-space>
-      </template>
+        </div>
+      </div>
 
       <a-table
         row-key="id"
@@ -61,6 +65,7 @@
         :pagination="pagination"
         :loading="loading"
         :row-selection="rowSelection"
+        :scroll="{ x: 1950 }"
         @change="handleTableChange"
       >
         <template #bodyCell="{ column, record }">
@@ -215,7 +220,7 @@
 
 <script setup>
 import { computed, reactive, ref, onMounted, onActivated } from 'vue';
-import { message, Modal } from 'ant-design-vue';
+import { message, Modal, Grid } from 'ant-design-vue';
 import { HolderOutlined } from '@ant-design/icons-vue';
 import { useRouter } from 'vue-router';
 import { batchDeleteArticle, batchPurgeArticle, batchUpdateArticleFlags, createArticlePreviewLink, deleteArticle, exportArticles, getArticleList, purgeArticle, reorderStickyArticles, restoreArticle, scanArticleLinks, updateArticleFlags } from '@/api/Article';
@@ -223,6 +228,7 @@ import { getAdminCategoryList } from '@/api/Category';
 import { getAdminTagList } from '@/api/Tag';
 import { formatDateTime } from '@/utils/date';
 const router = useRouter();
+const screens = Grid.useBreakpoint();
 const loading = ref(false);
 const articles = ref([]);
 const categoryOptions = ref([]);
@@ -336,6 +342,7 @@ const columns = computed(() => [{
 }, {
   title: '标题',
   dataIndex: 'title',
+  width: 260,
   ellipsis: true
 }, {
   title: '分类',
@@ -376,7 +383,7 @@ const columns = computed(() => [{
   title: '操作',
   dataIndex: 'action',
   width: listMode.value === 'deleted' ? 180 : 220,
-  fixed: 'right'
+  fixed: screens.value.lg ? 'right' : undefined
 }]);
 const batchActionTitle = computed(() => listMode.value === 'deleted' ? '确认彻底删除选中的文章？该操作无法恢复。' : '确认将选中的文章移入回收站？前台将不可见。');
 const batchActionText = computed(() => listMode.value === 'deleted' ? '批量彻底删除' : '批量移入回收站');
@@ -636,6 +643,23 @@ onActivated(() => {
 <style lang="scss" scoped>
 .admin-page {
   padding: 16px;
+  min-width: 0;
+}
+
+.article-toolbar { display: grid; gap: 12px; margin-bottom: 20px; min-width: 0; }
+.article-toolbar__filters, .article-toolbar__actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.article-toolbar__search { flex: 1 1 260px; min-width: 180px; max-width: 420px; }
+.article-toolbar__select { flex: 0 1 140px; min-width: 100px; }
+.article-toolbar__filters :deep(.ant-radio-group) { flex-shrink: 0; }
+@media (max-width: 768px) {
+  .admin-page :deep(.ant-card-head-wrapper) { width: 100%; }
+  .admin-page :deep(.ant-card-extra) { width: auto; }
+}
+@media (max-width: 600px) {
+  .admin-page { padding: 8px; }
+  .admin-page :deep(.ant-card-body) { padding: 12px; }
+  .article-toolbar__search { flex-basis: 100%; max-width: none; min-width: 0; }
+  .article-toolbar__select { flex: 1 1 90px; min-width: 0; }
 }
 
 .article-quick-control {

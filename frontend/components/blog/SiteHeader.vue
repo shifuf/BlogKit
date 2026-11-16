@@ -14,8 +14,15 @@ const {
 } = useLoginModal();
 const {
   logout: requestLogout,
-  fetchNotificationUnreadCount
+  fetchNotificationUnreadCount,
+  fetchSeries
 } = useApiClient();
+const { data: navigationSeries } = await useAsyncData('navigation-series', async () => {
+  try {
+    const response = await fetchSeries();
+    return response.success && Array.isArray(response.data) ? response.data : [];
+  } catch { return []; }
+}, { default: () => [] });
 const unreadNotifications = ref(0);
 const loadUnreadNotifications = async () => { if (!userStore.isAuthenticated) { unreadNotifications.value=0; return; } try { const r=await fetchNotificationUnreadCount(); unreadNotifications.value=r.success?Number(r.data.count||0):0; } catch {} };
 let unreadTimer: number | undefined;
@@ -139,7 +146,7 @@ const navItems = computed<NavItem[]>(() => {
     entries.push({ order: item.order, id: item.id, item: item.item });
   });
   entries.sort((a, b) => (a.order - b.order) || (a.id - b.id));
-  return [...entries.map(entry => entry.item), { label: '系列', to: '/series', icon: 'icon-archive' }, ...(userStore.isAuthenticated ? [{ label: '继续阅读', to: '/reading', icon: 'icon-article' }] : [])];
+  return [...entries.map(entry => entry.item), ...(navigationSeries.value.length ? [{ label: '系列', to: '/series', icon: 'icon-archive' }] : []), ...(userStore.isAuthenticated ? [{ label: '继续阅读', to: '/reading', icon: 'icon-article' }] : [])];
 });
 // 文章路由即挂沉浸顶栏 class；无 hero 时(404)靠 body:has(.article-detail-hero) 的 CSS 不把图标强行变白。
 const isArticlePage = computed(() => route.path.startsWith('/article/'));
@@ -306,6 +313,16 @@ onUnmounted(() => {
     :class="{ 'site-header--article-mobile': isArticlePage, 'site-header--article-scrolled': articleTitleVisible, 'site-header--home': isHomePage }"
     style="--header-bg-image: none;"
   >
+    <svg class="site-logo-filters" aria-hidden="true" width="0" height="0" focusable="false">
+      <defs>
+        <filter id="site-logo-white-glyphs" color-interpolation-filters="sRGB">
+          <!-- The source logo has an opaque white background. Use its ink as alpha
+               before painting it white, preserving antialiasing and transparent space. -->
+          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -0.2126 -0.7152 -0.0722 0 1" />
+          <feComposite in2="SourceAlpha" operator="in" />
+        </filter>
+      </defs>
+    </svg>
     <div class="site-header__top">
       <div class="site-header__top-inner">
         <div class="site-header__left">
