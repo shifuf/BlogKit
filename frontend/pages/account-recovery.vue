@@ -1,0 +1,11 @@
+<script setup lang="ts">
+const route=useRoute(),config=useRuntimeConfig();
+const email=ref(''),password=ref(''),confirmation=ref(''),busy=ref(false),message=ref(''),error=ref('');
+const token=computed(()=>typeof route.query.token==='string'?route.query.token:'');
+const verifying=computed(()=>route.query.action==='verify-email');
+const complete=ref(false);
+const submit=async()=>{error.value='';message.value='';if(token.value&&!verifying.value&&(password.value.length<12||password.value!==confirmation.value)){error.value='请输入至少 12 位新密码，并确认两次一致';return}busy.value=true;try{const path=verifying.value?'verify-email':token.value?'reset-password':'forgot-password';await $fetch(`/auth/recovery/${path}`,{baseURL:config.public.apiBaseUrl,method:'POST',body:verifying.value?{token:token.value}:token.value?{token:token.value,password:password.value}:{email:email.value}});message.value=verifying.value?'邮箱验证成功':token.value?'密码已更新，所有设备已退出，请重新登录':'如果该邮箱已验证，密码恢复邮件将发送至邮箱。';complete.value=Boolean(token.value);password.value='';confirmation.value=''}catch(e:any){error.value=e?.data?.message||'操作失败，请重新发起申请'}finally{busy.value=false}};
+</script>
+<template><main class="recovery"><NuxtLink to="/">← 返回首页</NuxtLink><h1>{{verifying?'验证邮箱':token?'重设密码':'找回密码'}}</h1><el-alert v-if="message" :title="message" type="success" :closable="false"/><el-alert v-if="error" :title="error" type="error" :closable="false"/>
+<el-form v-if="!complete" label-position="top" @submit.prevent="submit"><template v-if="!token"><p>请输入在账号安全页验证过的邮箱。</p><el-form-item label="邮箱"><el-input v-model="email" type="email" autocomplete="email" required/></el-form-item></template><template v-else-if="!verifying"><el-form-item label="新密码（至少12位）"><el-input v-model="password" type="password" show-password autocomplete="new-password" /></el-form-item><el-form-item label="确认新密码"><el-input v-model="confirmation" type="password" show-password autocomplete="new-password" /></el-form-item></template><el-button native-type="submit" type="primary" :loading="busy">{{verifying?'确认验证':token?'保存新密码':'发送恢复邮件'}}</el-button></el-form></main></template>
+<style scoped>.recovery{max-width:520px;margin:60px auto;padding:24px}.recovery h1{font-size:1.8rem;margin:20px 0}.recovery .el-form{margin-top:24px}</style>

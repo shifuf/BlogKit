@@ -16,3 +16,8 @@ tmp-*.log
 .env.local
 .env.*.local
 *.ps1
+/backups/
+/tests/ops/__pycache__/
+/scripts/ops/__pycache__/
+/.runtime/
+/secrets/

@@ -6,6 +6,7 @@
         <a-space>
           <span v-if="draftSavedAt" class="draft-saved-hint">已自动保存 {{ draftSavedAt }}</span>
           <a-button v-if="isEdit" @click="openVersionDrawer">版本历史</a-button>
+          <a-button :loading="qualityLoading" @click="runQualityCheck(true)">检查质量与链接</a-button>
           <a-button @click="goBack">返回列表</a-button>
           <a-button type="primary" :loading="saving" @click="submitArticle">保存文章</a-button>
         </a-space>
@@ -47,6 +48,12 @@
               <div class="form-help">AI 摘要独立于上方 SEO 摘要：仅在开启「前台展示」时于文章详情页正文上方以卡片展示。需先在「系统设置 - AI 服务」配置好接口。</div>
             </a-form-item>
             <a-form-item label="正文" name="content">
+              <a-alert
+                type="info"
+                show-icon
+                style="margin-bottom:12px"
+                :message="bodyImagesPublic ? '公开 / 隐藏文章的新增正文图片作为公开素材上传，可独立访问；之后修改文章权限不会自动收回素材权限。' : '新增正文图片按私有素材上传，读者需通过文章授权预览；从图库插入的已有素材保留原权限。'"
+              />
               <div ref="editorWrapRef" class="markdown-editor">
                 <MdEditor
                   :key="editorModeKey"
@@ -123,6 +130,17 @@
               <a-input v-model:value="form.scheduledPublishAt" type="datetime-local" />
               <div class="form-help">保存为定时发布时，发布时间必须晚于当前时间。</div>
             </a-form-item>
+            <a-form-item label="所属系列">
+              <a-select v-model:value="form.seriesId" allow-clear placeholder="不属于系列">
+                <a-select-option v-for="item in seriesOptions" :key="item.id" :value="item.id">{{ item.name }}</a-select-option>
+              </a-select>
+            </a-form-item>
+            <a-form-item v-if="form.seriesId" label="系列内顺序"><a-input-number v-model:value="form.seriesOrder" :min="0" /></a-form-item>
+            <a-form-item label="定时下架"><a-input v-model:value="form.scheduledUnpublishAt" type="datetime-local" allow-clear /></a-form-item>
+            <a-alert v-if="serverQuality.length" type="warning" message="服务器检查结果" style="margin-bottom:16px"><template #description><ul><li v-for="issue in serverQuality" :key="issue.code">[{{ issue.severity }}] {{ issue.message }}</li></ul></template></a-alert>
+            <a-alert v-if="qualityIssues.length" type="warning" message="发布前质量检查" style="margin-bottom:16px">
+              <template #description><ul><li v-for="issue in qualityIssues" :key="issue">{{ issue }}</li></ul></template>
+            </a-alert>
             <a-form-item label="评论">
               <a-switch
                 v-model:checked="form.commentsEnabled"
@@ -208,7 +226,8 @@
                 </a-upload>
                 <a-button block @click="coverPickerOpen = true">从图库选择</a-button>
               </a-space>
-              <img v-if="form.coverImageUrl" class="cover-preview" :src="form.coverImageUrl" alt="封面预览" />
+              <div class="form-help">封面用于公开列表，上传封面为公开素材；图库素材保留原权限。</div>
+              <img v-if="form.coverImageUrl" class="cover-preview" :src="previewImageUrl(form.coverImageUrl)" alt="封面预览" />
             </a-form-item>
           </aside>
         </div>
@@ -251,6 +270,11 @@
       </a-spin>
     </a-drawer>
 
+    <a-modal v-model:open="conflictOpen" title="文章已被其他窗口更新" :width="versionDiffWidth" :footer="null">
+      <p>服务器版本 {{ conflictServer?.version }} 与本地编辑发生冲突。下方红色为服务器内容，绿色为本地内容。</p>
+      <div class="diff-view"><div v-for="(line,index) in conflictLines" :key="index" class="diff-line" :class="`diff-line--${line.type}`"><span>{{ line.type === 'added' ? '+' : line.type === 'removed' ? '-' : ' ' }}</span><code>{{ line.text }}</code></div></div>
+      <a-space style="margin-top:16px"><a-button @click="acceptServer">载入服务器版本</a-button><a-button type="primary" @click="keepLocal">保留本地，重新确认保存</a-button></a-space>
+    </a-modal>
     <a-modal v-model:open="versionDiffOpen" title="版本差异" :width="versionDiffWidth" :footer="null" wrap-class-name="version-diff-modal">
       <div v-if="diffVersion" class="diff-head">历史版本 #{{ diffVersion.id }} 与当前编辑内容对比</div>
       <div class="diff-legend"><span class="added">新增</span><span class="removed">删除</span><span>未变化</span></div>
@@ -258,13 +282,14 @@
     </a-modal>
 
     <AmapPicker ref="amapPickerRef" @pick="name => (form.location = name)" />
-    <AttachmentPicker v-model:open="attachmentPickerOpen" @pick="insertLibraryImages" />
+    <AttachmentPicker v-model:open="attachmentPickerOpen" @previews="mergeMediaPreviews" @pick="insertLibraryImages" />
     <AttachmentPicker
       v-model:open="coverPickerOpen"
       :multiple="false"
       :allow-crop="true"
       crop-preset="16:9"
       crop-title="裁剪封面"
+      @previews="mergeMediaPreviews"
       @pick="pickCoverFromLibrary"
     />
   </div>
@@ -277,11 +302,14 @@ import { PlusOutlined } from '@ant-design/icons-vue';
 import { useRoute, useRouter } from 'vue-router';
 import { MdEditor, config } from 'md-editor-v3';
 import 'md-editor-v3/lib/style.css';
-import { deleteArticleVersion, generateArticleAiSummary, getArticleDetail, listArticleVersions, restoreArticleVersion, saveOrUpdateArticle } from '@/api/Article';
+import { checkArticleQuality, deleteArticleVersion, generateArticleAiSummary, getArticleDetail, getArticleMediaPreviews, listArticleVersions, restoreArticleVersion, saveOrUpdateArticle } from '@/api/Article';
+import { getAttachmentList } from '@/api/Attachment';
 import { getCategoryList } from '@/api/Category';
 import { createTag, getTagList } from '@/api/Tag';
 import { uploadImage } from '@/api/File';
+import { getArticleSeriesList } from '@/api/Series';
 import { cropImage, uploadImageWithCrop } from '@/utils/imageCrop';
+import { resolveImagePreview, stripUfmAccessParams } from '@/utils/imageCropUrl';
 import { listSettings } from '@/api/Settings';
 import { getUserList } from '@/api/User';
 import { applyBlogContainer, decodeBlockPayload } from '@/utils/blog-markdown';
@@ -295,6 +323,8 @@ import MusicToolbar from './components/MusicToolbar.vue';
 import LibraryToolbar from './components/LibraryToolbar.vue';
 import AmapPicker from '@/components/AmapPicker.vue';
 import AttachmentPicker from '@/components/AttachmentPicker.vue';
+const mediaPreviews = ref({});
+const previewImageUrl = url => resolveImagePreview(url, mediaPreviews.value);
 config({
   editorExtensions: {
     // 本地化代码高亮，避免后台部署到国内时从 unpkg 拉取失败/超时。
@@ -310,6 +340,17 @@ config({
   },
   markdownItConfig(md) {
     applyBlogContainer(md);
+    const renderImage = md.renderer.rules.image;
+    md.renderer.rules.image = (tokens, index, options, env, renderer) => {
+      const token = tokens[index];
+      const stable = token.attrGet('src');
+      token.attrSet('src', previewImageUrl(stable));
+      try {
+        return renderImage ? renderImage(tokens, index, options, env, renderer) : renderer.renderToken(tokens, index, options);
+      } finally {
+        token.attrSet('src', stable);
+      }
+    };
   }
 });
 const desktopToolbars = ['bold', 'underline', 'italic', '-', 'title', 'strikeThrough', 'quote', 'unorderedList', 'orderedList', 'task', '-', 'codeRow', 'code', 'link', 'image', 'table', '-', 0, 1, 2, 3, 4, 5, '-', 'revoke', 'next', '-', 'preview', 'htmlPreview', 'catalog', '-', 'pageFullscreen', 'fullscreen'];
@@ -368,8 +409,31 @@ const form = reactive({
   visibility: 'PUBLIC',
   accessPassword: '',
   allowedUserIds: [],
-  listedInPublic: false
+  listedInPublic: false,
+  version: null,
+  seriesId: undefined,
+  seriesOrder: 0,
+  scheduledUnpublishAt: ''
 });
+const bodyImagesPublic = computed(() => ['PUBLIC', 'UNLISTED'].includes(form.visibility));
+const mergeMediaPreviews = values => {
+  mediaPreviews.value = { ...mediaPreviews.value, ...values };
+  editorRef.value?.rerender();
+};
+const rememberUploadPreview = asset => {
+  if (asset?.url && asset.previewUrl) mergeMediaPreviews({ [stripUfmAccessParams(asset.url)]: asset.previewUrl });
+};
+let mediaPreviewRequest = 0;
+const loadMediaPreviews = async () => {
+  const request = ++mediaPreviewRequest;
+  const id = articleId.value;
+  const loads = [getAttachmentList({ pageNum: 1, pageSize: 100 }).then(page =>
+    Object.fromEntries((page.items || []).filter(asset => asset.url && asset.previewUrl).map(asset => [asset.url, asset.previewUrl])))];
+  if (id) loads.push(getArticleMediaPreviews(id));
+  const results = await Promise.allSettled(loads);
+  if (request !== mediaPreviewRequest || id !== articleId.value) return;
+  for (const result of results) if (result.status === 'fulfilled') mergeMediaPreviews(result.value);
+};
 const insertMusic = code => editorRef.value?.insert(() => ({ targetValue: `\n${code}\n`, select: false }));
 const aiSummaryLoading = ref(false);
 const hasExistingPassword = ref(false);
@@ -426,7 +490,9 @@ const snapshotForm = () => ({
   scheduledPublishAt: form.scheduledPublishAt,
   visibility: form.visibility,
   allowedUserIds: [...form.allowedUserIds],
-  listedInPublic: form.listedInPublic
+  listedInPublic: form.listedInPublic,
+  version: form.version, seriesId: form.seriesId, seriesOrder: form.seriesOrder,
+  scheduledUnpublishAt: form.scheduledUnpublishAt
 });
 const saveDraft = () => {
   try {
@@ -499,7 +565,10 @@ const maybeRestoreDraft = () => {
         scheduledPublishAt: draft.scheduledPublishAt ?? form.scheduledPublishAt,
         visibility: draft.visibility ?? form.visibility,
         allowedUserIds: Array.isArray(draft.allowedUserIds) ? draft.allowedUserIds : form.allowedUserIds,
-        listedInPublic: draft.listedInPublic ?? form.listedInPublic
+        listedInPublic: draft.listedInPublic ?? form.listedInPublic,
+        seriesId: draft.seriesId ?? form.seriesId,
+        seriesOrder: draft.seriesOrder ?? form.seriesOrder,
+        scheduledUnpublishAt: draft.scheduledUnpublishAt ?? form.scheduledUnpublishAt
       });
       draftReady = true;
     },
@@ -528,6 +597,8 @@ const canCreateTag = computed(() => {
 // 将表单重置为新建时的默认值。keep-alive 复用组件时（编辑A→新建、编辑A→编辑B）
 // 先重置再按当前路由加载，避免残留上一次表单内容。
 const resetForm = () => {
+  mediaPreviewRequest += 1;
+  mediaPreviews.value = {};
   Object.assign(form, {
     id: null,
     title: '',
@@ -550,7 +621,11 @@ const resetForm = () => {
     visibility: 'PUBLIC',
     accessPassword: '',
     allowedUserIds: [],
-    listedInPublic: false
+    listedInPublic: false,
+  version: null,
+  seriesId: undefined,
+  seriesOrder: 0,
+  scheduledUnpublishAt: ''
   });
 };
 const goBack = () => router.push('/articles');
@@ -605,8 +680,9 @@ const insertGallery = async files => {
         const formData = new FormData();
         formData.append('file', file);
         // eslint-disable-next-line no-await-in-loop
-        const result = await uploadImage(formData);
-        if (result?.url) urls.push(result.url);
+        const result = await uploadImage(formData, bodyImagesPublic.value);
+        rememberUploadPreview(result);
+        if (result?.url) urls.push(stripUfmAccessParams(result.url));
       }
       hide();
       if (!urls.length) {
@@ -780,7 +856,10 @@ const applyArticleDetail = detail => {
     visibility: detail.visibility || 'PUBLIC',
     accessPassword: '',
     allowedUserIds: detail.allowedUserIds || [],
-    listedInPublic: detail.listedInPublic === true
+    listedInPublic: detail.listedInPublic === true,
+    version: detail.version,
+    seriesId: detail.seriesId || undefined, seriesOrder: detail.seriesOrder || 0,
+    scheduledUnpublishAt: toDateTimeLocal(detail.scheduledUnpublishAt)
   });
   hasExistingPassword.value = detail.hasPassword === true;
 };
@@ -830,7 +909,8 @@ const uploadCover = async ({
 }) => {
   coverUploading.value = true;
   try {
-    const result = await uploadFormData(file, { defaultPreset: '16:9', title: '裁剪封面' });
+    const result = await uploadFormData(file, { publicAccess: true, defaultPreset: '16:9', title: '裁剪封面' });
+    rememberUploadPreview(result);
     form.coverImageUrl = result.url;
     message.success('封面已上传');
     onSuccess(result);
@@ -855,10 +935,11 @@ const uploadEditorImages = async (files, callback) => {
         const formData = new FormData();
         formData.append('file', file);
         // eslint-disable-next-line no-await-in-loop
-        const result = await uploadImage(formData);
+        const result = await uploadImage(formData, bodyImagesPublic.value);
+        rememberUploadPreview(result);
         if (result?.url) results.push(result);
       }
-      const urls = results.map(item => item.url).filter(Boolean);
+      const urls = results.map(item => stripUfmAccessParams(item.url)).filter(Boolean);
       if (!urls.length) {
         throw new Error('上传未返回图片地址');
       }
@@ -996,6 +1077,42 @@ const removeVersion = async version => {
     deletingVersionId.value = null;
   }
 };
+const qualityLoading = ref(false);
+const serverQuality = ref([]);
+const runQualityCheck = async (checkLinks = false) => {
+  qualityLoading.value = true;
+  try {
+    const result = await checkArticleQuality({ title: form.title, content: form.content, summary: form.summary,
+      coverImageUrl: form.coverImageUrl, slug: form.slug, seriesId: form.seriesId || null,
+      seriesOrder: form.seriesOrder, scheduledPublishAt: toOffsetDateTime(form.scheduledPublishAt) || null,
+      scheduledUnpublishAt: toOffsetDateTime(form.scheduledUnpublishAt) || null, checkLinks });
+    serverQuality.value = result.issues || [];
+    if (!serverQuality.value.length) message.success('质量检查通过');
+    return result.ready;
+  } finally { qualityLoading.value = false; }
+};
+const seriesOptions = ref([]);
+const conflictOpen = ref(false);
+const conflictServer = ref(null);
+const conflictLines = computed(() => buildLineDiff(conflictServer.value?.content || '', form.content));
+const acceptServer = () => { applyArticleDetail(conflictServer.value); conflictOpen.value = false; };
+const keepLocal = () => {
+  // Explicit reconciliation: keep local text and use the freshly reviewed server revision.
+  form.version = conflictServer.value.version;
+  conflictOpen.value = false;
+  message.info('已保留本地编辑，请确认差异后再次保存');
+};
+const qualityIssues = computed(() => {
+  const issues = [];
+  if (!form.title.trim()) issues.push('请填写标题');
+  if (!form.content.trim()) issues.push('请填写正文');
+  if (!form.summary.trim()) issues.push('建议填写公开摘要，明确受限文章可公开的内容');
+  if (!form.coverImageUrl.trim()) issues.push('建议添加封面');
+  if (/!\[\s*\]\(/.test(form.content)) issues.push('部分图片缺少替代文字');
+  if (/\]\(\s*(?:javascript|data):/i.test(form.content)) issues.push('正文包含不安全链接');
+  if (form.scheduledUnpublishAt && new Date(form.scheduledUnpublishAt).getTime() <= Date.now()) issues.push('定时下架时间已过期');
+  return issues;
+});
 const submitArticle = async () => {
   await formRef.value.validate();
   if (form.visibility === 'PASSWORD' && !hasExistingPassword.value && !form.accessPassword.trim()) {
@@ -1013,10 +1130,17 @@ const submitArticle = async () => {
       return;
     }
   }
+  if (form.status === 'PUBLISHED' && !(await runQualityCheck(false))) {
+    message.warning('请先处理质量检查中的错误'); return;
+  }
   saving.value = true;
   try {
     await saveOrUpdateArticle({
       id: form.id,
+      version: form.version,
+      seriesId: form.seriesId || null,
+      seriesOrder: Number(form.seriesOrder) || 0,
+      scheduledUnpublishAt: toOffsetDateTime(form.scheduledUnpublishAt) || null,
       title: form.title.trim(),
       slug: form.slug?.trim(),
       summary: form.summary.trim(),
@@ -1037,11 +1161,16 @@ const submitArticle = async () => {
       visibility: form.visibility,
       accessPassword: form.visibility === 'PASSWORD' ? form.accessPassword.trim() ? form.accessPassword : null : null,
       allowedUserIds: form.visibility === 'PRIVATE' ? form.allowedUserIds : [],
-      listedInPublic: form.visibility === 'PUBLIC' ? true : form.listedInPublic
+      listedInPublic: form.listedInPublic
     });
     message.success('文章已保存，缓存已清除');
     clearDraft();
     goBack();
+  } catch (error) {
+    if (error.status === 409 || error.response?.status === 409) {
+      conflictServer.value = await getArticleDetail(form.id);
+      conflictOpen.value = true;
+    } else throw error;
   } finally {
     saving.value = false;
   }
@@ -1058,8 +1187,10 @@ const loadPageData = async () => {
   resetForm();
   hasExistingPassword.value = false;
   await loadArticleDefaults();
+  seriesOptions.value = await getArticleSeriesList();
   await loadArticle();
   maybeRestoreDraft();
+  void loadMediaPreviews();
 };
 let pageInitialized = false;
 onMounted(async () => {

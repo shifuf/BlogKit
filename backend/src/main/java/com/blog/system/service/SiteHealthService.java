@@ -47,7 +47,6 @@ public class SiteHealthService {
         this.siteUrl = siteUrl;
     }
 
-    @Transactional(readOnly = true)
     public SiteHealthResponse checkHealth() {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -98,15 +97,17 @@ public class SiteHealthService {
     private SiteHealthItemResponse checkUrl(String key, String name, String url, String method, String bodyMustContain) {
         long startedAt = System.nanoTime();
         try {
-            HttpRequest request = HttpRequest.newBuilder(outboundUrlValidator.validate(url))
+            HttpRequest request = HttpRequest.newBuilder(("feed".equals(key) || "sitemap".equals(key)) ? URI.create(url) : outboundUrlValidator.validatePublic(url))
                     .timeout(Duration.ofSeconds(8))
                     .method(method, HttpRequest.BodyPublishers.noBody())
                     .header("User-Agent", "blog-health-check/1.0")
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            String body;
+            try(var input=response.body()) { byte[] bytes=input.readNBytes(512_001); if(bytes.length>512_000)throw new java.io.IOException("响应过大"); body=new String(bytes,StandardCharsets.UTF_8); }
             long durationMs = elapsedMs(startedAt);
             boolean httpOk = response.statusCode() >= 200 && response.statusCode() < 300;
-            boolean bodyOk = !StringUtils.hasText(bodyMustContain) || response.body().contains(bodyMustContain);
+            boolean bodyOk = !StringUtils.hasText(bodyMustContain) || body.contains(bodyMustContain);
             String status = httpOk && bodyOk ? "OK" : "FAIL";
             String message = httpOk && bodyOk ? "访问正常" : "响应异常";
             return new SiteHealthItemResponse(key, name, status, response.statusCode(), durationMs, message);

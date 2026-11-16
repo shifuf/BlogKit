@@ -23,6 +23,7 @@ export interface ArticleSummary {
 }
 export type ArticleSort = 'latest' | 'views' | 'likes' | 'comments';
 export interface ArticleDetail extends ArticleSummary {
+  seriesId?: number; seriesSlug?: string; seriesName?: string; seriesOrder?: number;
   content: string;
   // AI 摘要：仅在文章开启展示且已生成时后端才下发，前台据此渲染正文上方的摘要卡片。
   aiSummary?: string | null;
@@ -52,6 +53,8 @@ export interface TagSummary {
   articleCount: number;
 }
 export interface SiteSettings {
+  profileGithub?: string;
+  profileEmail?: string;
   siteName: string;
   siteSubtitle: string;
   siteDescription: string;
@@ -104,6 +107,7 @@ export interface SiteSettings {
   friendPageIntro?: string;
 }
 export interface DynamicPost {
+  liked?: boolean;
   id: number;
   title: string;
   content: string;
@@ -127,6 +131,10 @@ export interface DynamicComment {
   replies?: DynamicComment[];
 }
 export interface CommentSummary {
+  replyToCommentId?: number | null;
+  replyTo?: string | null;
+  replyToContent?: string | null;
+  replyToUnavailable?: boolean;
   id: number;
   articleId: number;
   parentId?: number | null;
@@ -250,6 +258,7 @@ export interface Category {
   icon?: string;
 }
 export interface Article {
+  seriesId?: number; seriesSlug?: string; seriesName?: string; seriesOrder?: number;
   slug: string;
   title: string;
   excerpt: string;
@@ -301,6 +310,10 @@ export interface FriendLinkSummary {
   updatedAt?: string;
 }
 export interface CommentItem {
+  replyToCommentId?: number | null;
+  replyToContent?: string | null;
+  replyToUnavailable?: boolean;
+  status?: string;
   id: number;
   author: string;
   content: string;

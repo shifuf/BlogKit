@@ -23,6 +23,11 @@ public class TaxonomyController {
         return ApiResponse.ok(taxonomyService.findCategories());
     }
 
+    @GetMapping("/api/v1/tags/summary")
+    public ApiResponse<com.blog.system.web.dto.TagSummaryResponse> tagSummary() {
+        return ApiResponse.ok(taxonomyService.findTagSummary());
+    }
+
     @GetMapping("/api/v1/tags")
     public ApiResponse<List<TagResponse>> listTags() {
         return ApiResponse.ok(taxonomyService.findTags());

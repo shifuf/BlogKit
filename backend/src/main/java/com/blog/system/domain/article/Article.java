@@ -41,6 +41,15 @@ public class Article {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private Long version;
+
+    @Column(columnDefinition = "text")
+    private String publicContent;
+
+    public Long getVersion() { return version == null ? 0L : version; }
+
     @Column(nullable = false, length = 160)
     private String title;
 
@@ -98,16 +107,16 @@ public class Article {
     @Column(nullable = false, length = 32)
     private ArticleStatus status = ArticleStatus.DRAFT;
 
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private long likeCount = 0;
 
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
     private long favoriteCount = 0;
 
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private long viewCount = 0;
 
-    @Column(nullable = false)
+    @Column(nullable = false, updatable = false)
     private long commentCount = 0;
 
     @Column(nullable = false, columnDefinition = "boolean default true")
@@ -169,12 +178,16 @@ public class Article {
     @PrePersist
     void prePersist() {
         OffsetDateTime now = OffsetDateTime.now();
+        publicContent = com.blog.system.service.SecretBlockFilter.publicText(content);
+        summary = com.blog.system.service.SecretBlockFilter.safeSummary(content, summary);
         createdAt = now;
         updatedAt = now;
     }
 
     @PreUpdate
     void preUpdate() {
+        publicContent = com.blog.system.service.SecretBlockFilter.publicText(content);
+        summary = com.blog.system.service.SecretBlockFilter.safeSummary(content, summary);
         updatedAt = OffsetDateTime.now();
     }
 

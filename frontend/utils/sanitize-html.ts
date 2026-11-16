@@ -68,6 +68,7 @@ const filterSafeClass = (value: string) => value.split(/\s+/).filter(cls => SAFE
 export const ARTICLE_XSS_OPTIONS: IFilterXSSOptions = {
   whiteList: {
     ...xssDefaults.getDefaultWhiteList(),
+    h1: ['id'], h2: ['id'], h3: ['id'], h4: ['id'], h5: ['id'], h6: ['id'],
     div: ['class', 'data-token', 'data-gate'],
     'music-player': [...MUSIC_PLAYER_ATTRS],
     figure: ['class'],

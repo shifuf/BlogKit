@@ -267,6 +267,13 @@ public class AdminSystemController {
         return ApiResponse.ok(externalNotificationService.listEmailTemplates());
     }
 
+    @GetMapping("/settings/backup/status")
+    public ApiResponse<com.blog.system.web.dto.BackupStatusResponse> backupStatus(){return ApiResponse.ok(systemBackupService.backupStatus());}
+    @PostMapping("/settings/backup/create")
+    public ApiResponse<com.blog.system.web.dto.BackupFileResponse> createBackup(){return ApiResponse.ok(systemBackupService.createManualBackup());}
+    @PostMapping("/settings/backup/drill")
+    public ApiResponse<com.blog.system.web.dto.BackupDrillResponse> drillBackup(){return ApiResponse.ok(systemBackupService.drillLatestBackup());}
+
     @GetMapping("/settings/backup")
     public ApiResponse<Map<String, Object>> exportBackup() {
         return ApiResponse.ok(systemBackupService.exportBackup());

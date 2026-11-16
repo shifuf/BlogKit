@@ -1,6 +1,5 @@
 package com.blog.system.service;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.blog.system.common.api.PageResponse;
 import com.blog.system.common.exception.BusinessException;
 import com.blog.system.common.exception.ForbiddenException;
@@ -27,7 +26,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.time.OffsetDateTime;
@@ -97,10 +95,12 @@ public class CommentService {
         var comments = commentRepository.findApprovedRootComments(articleId, ArticleCommentStatus.APPROVED, pageable);
         List<ArticleComment> rootComments = comments.getContent();
         List<Long> rootIds = rootComments.stream().map(ArticleComment::getId).toList();
-        Map<Long, List<ArticleComment>> repliesByParentId = rootIds.isEmpty()
-                ? Collections.emptyMap()
-                : commentRepository.findApprovedRepliesByParentIds(rootIds, ArticleCommentStatus.APPROVED).stream()
-                .collect(Collectors.groupingBy(reply -> reply.getParent().getId()));
+        // Bound the preview per thread; the dedicated endpoint loads further replies.
+        Map<Long, List<ArticleComment>> repliesByParentId = new LinkedHashMap<>();
+        for (Long rootId : rootIds) {
+            repliesByParentId.put(rootId, commentRepository.findApprovedReplies(rootId,
+                    ArticleCommentStatus.APPROVED, PageRequest.of(0, 2)).getContent());
+        }
         Set<Long> likedCommentIds = findLikedCommentIds(rootComments, repliesByParentId);
         return new PageResponse<>(
                 rootComments.stream()
@@ -119,6 +119,21 @@ public class CommentService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public PageResponse<CommentResponse> findCommentReplies(Long commentId, int page, int size) {
+        ArticleComment target = commentRepository.findById(commentId)
+                .orElseThrow(() -> new BusinessException("评论不存在"));
+        Article article = requireCommentableArticle(target.getArticle().getId());
+        requireArticleCommentsEnabled(article);
+        requireVisibleComment(target);
+        ArticleComment root = rootOf(target);
+        var pageable = PageRequest.of(Math.max(0, page), Math.min(50, Math.max(1, size)));
+        var replies = commentRepository.findApprovedReplies(root.getId(), ArticleCommentStatus.APPROVED, pageable);
+        Set<Long> liked = findLikedCommentIds(List.of(), Map.of(root.getId(), replies.getContent()));
+        return new PageResponse<>(replies.getContent().stream().map(c -> toResponse(c, liked, List.of())).toList(),
+                replies.getNumber(), replies.getSize(), replies.getTotalElements(), replies.getTotalPages());
+    }
+
     /**
      * 创建评论。region 须由调用方在事务外解析好再传入（避免外部 HTTP 卡写事务）。
      */
@@ -127,7 +142,9 @@ public class CommentService {
         UserAccount currentUser = currentUserService.getCurrentUserOrNull();
         Article article = requireCommentableArticle(request.articleId());
         requireArticleCommentsEnabled(article);
-        ArticleComment parent = resolveParentComment(request.parentId(), article.getId());
+        ArticleComment target = resolveParentComment(request.parentId(), article.getId());
+        ArticleComment parent = rootOf(target);
+        if (parent != null) requireApprovedComment(parent);
         // 入库前剥离 HTML 标签，阻止 <img onerror=...> 等 payload 原样落库被其它端原样输出。
         String safeContent = HtmlSanitizer.cleanText(request.content(), 2000);
         if (!StringUtils.hasText(safeContent)) {
@@ -137,6 +154,7 @@ public class CommentService {
         ArticleComment comment = new ArticleComment();
         comment.setArticle(article);
         comment.setParent(parent);
+        setReplyContext(comment, target);
         comment.setContent(safeContent);
         comment.setStatus(status);
         // region 已在事务外解析，此处仅落库。
@@ -192,7 +210,7 @@ public class CommentService {
             // 评论数用原子 SQL，避免并发 read-modify-write 丢更新；勿再 save 带旧计数的 Article 实体。
             articleRepository.incrementCommentCount(article.getId());
             if (parent != null) {
-                parent.setReplyCount(parent.getReplyCount() + 1);
+                commentRepository.adjustReplyCount(parent.getId(), 1);
             }
         }
         ArticleComment saved = commentRepository.save(comment);
@@ -217,7 +235,8 @@ public class CommentService {
     private void notifyCommentCreated(ArticleComment comment, UserAccount actor) {
         String actorName = StringUtils.hasText(comment.getGuestName()) ? comment.getGuestName() : comment.getAuthor().getDisplayName();
         Article article = comment.getArticle();
-        UserAccount recipient = comment.getParent() == null ? article.getAuthor() : comment.getParent().getAuthor();
+        ArticleComment target = replyTarget(comment);
+        UserAccount recipient = target == null ? article.getAuthor() : target.getAuthor();
         boolean guestRecipient = recipient == null || GUEST_USERNAME.equals(recipient.getUsername());
         if (!guestRecipient && (actor == null || !recipient.getId().equals(actor.getId()))) {
             String title = comment.getParent() == null ? "文章收到新评论" : "你的评论收到回复";
@@ -240,7 +259,7 @@ public class CommentService {
 
     /** 回复邮件：父评论开启 notifyOnReply、站点开关与平台就绪时发送。 */
     private void maybeSendReplyEmail(ArticleComment comment, String actorName) {
-        ArticleComment parent = comment.getParent();
+        ArticleComment parent = replyTarget(comment);
         if (parent == null || !parent.isNotifyOnReply()) {
             return;
         }
@@ -509,13 +528,8 @@ public class CommentService {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         ArticleComment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new BusinessException("评论不存在"));
-        if (comment.getArticle().getStatus() != ArticleStatus.PUBLISHED) {
-            throw new BusinessException("文章不存在或未发布");
-        }
-        if (comment.getArticle().isDeleted()) {
-            throw new BusinessException("文章不存在或未发布");
-        }
-        requireApprovedComment(comment);
+        requireCommentableArticle(comment.getArticle().getId());
+        requireVisibleComment(comment);
         requireArticleCommentsEnabled(comment.getArticle());
         var existing = commentLikeRepository.findByComment_IdAndUser_Id(commentId, currentUser.getId());
         boolean liked;
@@ -654,7 +668,9 @@ public class CommentService {
         }
         ArticleComment reply = new ArticleComment();
         reply.setArticle(article);
-        reply.setParent(parent);
+        ArticleComment root = rootOf(parent);
+        reply.setParent(root);
+        setReplyContext(reply, parent);
         reply.setAuthor(currentUser);
         reply.setContent(safeContent);
         reply.setStatus(ArticleCommentStatus.APPROVED);
@@ -662,9 +678,9 @@ public class CommentService {
         reply.setPinned(false);
         reply.setLikeCount(0);
         reply.setReplyCount(0);
-        articleRepository.incrementCommentCount(article.getId());
-        parent.setReplyCount(parent.getReplyCount() + 1);
         ArticleComment saved = commentRepository.save(reply);
+        articleRepository.incrementCommentCount(article.getId());
+        commentRepository.adjustReplyCount(root.getId(), 1);
         // 管理员回复：给原评论作者发通知/邮件（与普通回复一致）。
         maybeSendReplyEmail(saved, displayNameOf(saved));
         UserAccount recipient = parent.getAuthor();
@@ -708,19 +724,15 @@ public class CommentService {
     }
 
     @Transactional
-    public CommentResponse reportComment(Long commentId) {
+    public void reportComment(Long commentId) {
         ArticleComment comment = commentRepository.findById(commentId)
                 .orElseThrow(() -> new BusinessException("评论不存在"));
-        if (comment.getArticle().getStatus() != ArticleStatus.PUBLISHED || comment.getArticle().isDeleted()) {
-            throw new BusinessException("文章不存在或未发布");
-        }
-        if (!isApproved(comment)) {
-            throw new BusinessException("评论尚未通过审核");
-        }
+        requireCommentableArticle(comment.getArticle().getId());
+        requireArticleCommentsEnabled(comment.getArticle());
+        requireVisibleComment(comment);
         comment.setReported(true);
         comment.setReportCount(comment.getReportCount() + 1);
         comment.setReportedAt(OffsetDateTime.now());
-        return toResponse(comment, Set.of(), List.of());
     }
 
     @Transactional
@@ -757,7 +769,7 @@ public class CommentService {
             commentLikeRepository.deleteAllByComment_Id(comment.getId());
             commentRepository.delete(comment);
             if (isApproved(comment)) {
-                parent.setReplyCount(Math.max(0, parent.getReplyCount() - 1));
+                commentRepository.adjustReplyCount(parent.getId(), -1);
                 articleRepository.decrementCommentCount(articleId, 1);
             }
         }
@@ -775,10 +787,50 @@ public class CommentService {
         if (!isApproved(parent)) {
             throw new BusinessException("只能回复已通过的评论");
         }
-        if (parent.getParent() != null) {
-            return parent.getParent();
-        }
         return parent;
+    }
+
+    private ArticleComment rootOf(ArticleComment target) {
+        Set<Long> visited = new java.util.HashSet<>();
+        ArticleComment root = target;
+        while (root != null && root.getParent() != null) {
+            if (!visited.add(root.getId())) throw new BusinessException("评论回复链异常");
+            if (!root.getArticle().getId().equals(root.getParent().getArticle().getId())) {
+                throw new BusinessException("评论回复链不属于同一文章");
+            }
+            root = root.getParent();
+        }
+        return root;
+    }
+
+    private void setReplyContext(ArticleComment reply, ArticleComment target) {
+        if (target == null) return;
+        reply.setReplyToCommentId(target.getId());
+        reply.setReplyToName(displayNameOf(target));
+        String quote = HtmlSanitizer.cleanText(target.getContent(), 2000);
+        reply.setReplyToContent(quote.length() <= 200 ? quote : quote.substring(0, 199) + "…");
+    }
+
+    private ArticleComment replyTarget(ArticleComment comment) {
+        return comment.getReplyToCommentId() == null ? comment.getParent()
+                : commentRepository.findById(comment.getReplyToCommentId()).orElse(null);
+    }
+
+    private boolean replyUnavailable(ArticleComment comment) {
+        if (comment.getReplyToCommentId() == null) return false;
+        ArticleComment target = replyTarget(comment);
+        return target == null || !isApproved(target)
+                || !target.getArticle().getId().equals(comment.getArticle().getId());
+    }
+
+    private String publicReplyQuote(ArticleComment comment) {
+        return replyUnavailable(comment) ? "" : comment.getReplyToContent();
+    }
+
+    private void requireVisibleComment(ArticleComment comment) {
+        requireApprovedComment(comment);
+        ArticleComment root = rootOf(comment);
+        if (root != null) requireApprovedComment(root);
     }
 
     private void requireArticleCommentsEnabled(Article article) {
@@ -848,12 +900,12 @@ public class CommentService {
         if (wasApproved && !willBeApproved) {
             articleRepository.decrementCommentCount(article.getId(), 1);
             if (comment.getParent() != null) {
-                comment.getParent().setReplyCount(Math.max(0, comment.getParent().getReplyCount() - 1));
+                commentRepository.adjustReplyCount(comment.getParent().getId(), -1);
             }
         } else if (!wasApproved && willBeApproved) {
             articleRepository.incrementCommentCount(article.getId());
             if (comment.getParent() != null) {
-                comment.getParent().setReplyCount(comment.getParent().getReplyCount() + 1);
+                commentRepository.adjustReplyCount(comment.getParent().getId(), 1);
             }
         }
     }
@@ -863,9 +915,8 @@ public class CommentService {
     }
 
     private Set<Long> findLikedCommentIds(List<ArticleComment> rootComments, Map<Long, List<ArticleComment>> repliesByParentId) {
-        if (!StpUtil.isLogin()) {
-            return Set.of();
-        }
+        UserAccount user = currentUserService.getCurrentUserOrNull();
+        if (user == null) return Set.of();
         List<Long> commentIds = Stream.concat(
                         rootComments.stream(),
                         repliesByParentId.values().stream().flatMap(List::stream)
@@ -875,7 +926,7 @@ public class CommentService {
         if (commentIds.isEmpty()) {
             return Set.of();
         }
-        return commentLikeRepository.findLikedCommentIds(StpUtil.getLoginIdAsLong(), commentIds);
+        return commentLikeRepository.findLikedCommentIds(user.getId(), commentIds);
     }
 
     private CommentResponse toResponse(ArticleComment comment, Set<Long> likedCommentIds, List<CommentResponse> replies) {
@@ -888,6 +939,10 @@ public class CommentService {
                 comment.getId(),
                 comment.getArticle().getId(),
                 comment.getParent() == null ? null : comment.getParent().getId(),
+                comment.getReplyToCommentId(),
+                comment.getReplyToName(),
+                publicReplyQuote(comment),
+                replyUnavailable(comment),
                 authorId,
                 authorName,
                 authorAvatarUrl,
@@ -914,7 +969,7 @@ public class CommentService {
                 comment.getArticle().getId(),
                 comment.getArticle().getTitle(),
                 comment.getParent() == null ? null : comment.getParent().getId(),
-                comment.getParent() == null ? null : displayNameOf(comment.getParent()),
+                comment.getReplyToName(),
                 comment.getContent(),
                 comment.getStatus().name(),
                 comment.getLikeCount(),
@@ -931,13 +986,15 @@ public class CommentService {
         } else if (!isGuest && comment.getAuthor() != null && StringUtils.hasText(comment.getAuthor().getEmail())) {
             email = comment.getAuthor().getEmail().trim();
         }
-        String replyTo = comment.getParent() == null ? "" : displayNameOf(comment.getParent());
+        String replyTo = comment.getReplyToName() == null ? "" : comment.getReplyToName();
         return new AdminCommentResponse(
                 comment.getId(),
                 comment.getArticle().getId(),
                 comment.getArticle().getTitle(),
                 comment.getParent() == null ? null : comment.getParent().getId(),
                 replyTo,
+                comment.getReplyToCommentId(),
+                comment.getReplyToContent(),
                 displayNameOf(comment),
                 isGuest ? "游客" : comment.getAuthor().getUsername(),
                 email,

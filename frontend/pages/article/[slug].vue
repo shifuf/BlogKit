@@ -4,7 +4,7 @@ import { ElMessage } from 'element-plus';
 import { type App, createApp, defineAsyncComponent, nextTick } from 'vue';
 import type { Article, Category } from '~/types/blog';
 import { buildCoverUrl, NO_COVER_IMAGE, toBlogArticle, toBlogCategory } from '~/utils/blog-adapter';
-import { applyBlogContainer } from '~/utils/blog-markdown';
+import { renderMarkdown } from '~/utils/render-markdown';
 import { hasCommentedLocally, markCommentedLocally, getGuestKey } from '~/utils/blog-blocks';
 import { defineMusicPlayerElement } from '~/utils/define-music-player';
 import { sanitizeArticleHtml as sanitizeArticleHtmlBase } from '~/utils/sanitize-html';
@@ -26,7 +26,10 @@ const {
   likeArticle,
   openDownload,
   toggleFavorite,
-  unlockArticle
+  unlockArticle,
+  fetchReadingProgress,
+  saveReadingProgress,
+  fetchSeriesDetail
 } = useApiClient();
 const {
   data: publicCategories
@@ -45,27 +48,6 @@ const tocRefreshKey = ref(0);
 const liveArticleTitle = useState('current-article-title', () => '');
 // 顶栏透明(白 logo/白分类)仅在真实文章 hero 渲染时启用；文章不存在/未发布时置 false，避免白底白字看不到 logo/分类。
 const articleHeroActive = useState('article-hero-active', () => false);
-const MdPreview = defineAsyncComponent(async () => {
-  defineMusicPlayerElement();
-  const [module] = await Promise.all([import('md-editor-v3'), import('md-editor-v3/lib/preview.css')]);
-  module.config({
-    editorExtensions: {
-      highlight: {
-        js: '/vendor/highlightjs/highlight.min.js',
-        css: {
-          atom: {
-            light: '/vendor/highlightjs/styles/atom-one-light.min.css',
-            dark: '/vendor/highlightjs/styles/atom-one-dark.min.css'
-          }
-        }
-      }
-    },
-    markdownItConfig(md) {
-      applyBlogContainer(md);
-    }
-  });
-  return module.MdPreview;
-});
 let tocRefreshFrame = 0;
 interface ArticlePageData {
   article: Article | null;
@@ -77,34 +59,87 @@ const emptyArticlePageData = (): ArticlePageData => ({
   categories: [],
   related: []
 });
+let detailRequestGeneration = 0;
+const startDetailRequest = () => ({
+  generation: ++detailRequestGeneration,
+  id: articleId.value,
+  slug: slug.value,
+  token: userStore.accessToken,
+  tokenName: userStore.tokenName
+});
+const detailRequestIsCurrent = (request: ReturnType<typeof startDetailRequest>) =>
+  request.generation === detailRequestGeneration && request.id === articleId.value && request.slug === slug.value
+  && request.token === userStore.accessToken && request.tokenName === userStore.tokenName;
+const currentDetailData = ref<ArticlePageData>(emptyArticlePageData());
 const {
   data: pageData,
   pending: loading,
-  refresh: refreshArticle
+  error: articleError
 } = await useAsyncData<ArticlePageData>(articlePageDataKey, async () => {
-  if (!isApiArticle.value) {
-    return emptyArticlePageData();
-  }
+  const request = startDetailRequest();
+  if (!isApiArticle.value) throw createError({ statusCode: 404, statusMessage: '文章不存在' });
   const [articleResult, relatedResult] = await Promise.allSettled([
-    fetchArticleDetail(articleId.value),
-    fetchRelatedArticles(articleId.value, 3)
+    fetchArticleDetail(request.id),
+    fetchRelatedArticles(request.id, 3)
   ]);
-  const detailResponse = articleResult.status === 'fulfilled' ? articleResult.value : null;
+  if (!detailRequestIsCurrent(request)) return currentDetailData.value;
+  if (articleResult.status === 'rejected') {
+    const error = articleResult.reason;
+    const status = error?.statusCode || error?.response?.status || 503;
+    throw createError({ statusCode: status === 404 ? 404 : status, statusMessage: status === 404 ? '文章不存在' : '文章暂时无法加载，请重试' });
+  }
+  const detailResponse = articleResult.value;
+  if (!detailResponse.success) throw createError({ statusCode: 404, statusMessage: detailResponse.message || '文章不存在' });
   const relatedResponse = relatedResult.status === 'fulfilled' ? relatedResult.value : null;
-  return {
+  const result = {
     article: detailResponse?.success ? toBlogArticle(detailResponse.data) : null,
     categories: (publicCategories.value || []).map(toBlogCategory).filter(Boolean) as Category[],
     related: relatedResponse?.success ? relatedResponse.data.map(toBlogArticle) : []
   };
+  currentDetailData.value = result;
+  return result;
 }, {
   default: emptyArticlePageData,
   watch: [slug],
   server: true,
   lazy: false
 });
+if (articleError.value) throw createError(articleError.value);
 const article = computed(() => pageData.value.article);
 const related = computed(() => pageData.value.related.slice(0, 3));
 const readingProgress = ref(0);
+const savedProgress = ref(0);
+const progressVersion = ref<number | undefined>();
+let progressSaveTimer: ReturnType<typeof setTimeout> | undefined;
+const persistProgress = async () => {
+  if (!userStore.isAuthenticated || article.value?.locked) return;
+  try {
+    const response = await saveReadingProgress(articleId.value, {
+      progress: Math.round(readingProgress.value), completed: readingProgress.value >= 95, version: progressVersion.value
+    });
+    if (response.success) progressVersion.value = response.data.version;
+  } catch { /* Reading never blocks on progress persistence. */ }
+};
+watch(readingProgress, () => {
+  if (!import.meta.client || !userStore.isAuthenticated) return;
+  if (progressSaveTimer) clearTimeout(progressSaveTimer);
+  progressSaveTimer = setTimeout(persistProgress, 1500);
+});
+const markReadLater = async () => {
+  if (!userStore.isAuthenticated) { openLogin(); return; }
+  try { await saveReadingProgress(articleId.value, { progress: Math.round(readingProgress.value), completed: false, later: true }); ElMessage.success('已加入稍后读'); }
+  catch { ElMessage.error('保存失败，请重试'); }
+};
+const resumeReading = () => {
+  const height = document.documentElement.scrollHeight - window.innerHeight;
+  window.scrollTo({ top: height * savedProgress.value / 100, behavior: 'smooth' });
+  savedProgress.value = 0;
+};
+const seriesArticles = ref<Array<{ id: number; title: string }>>([]);
+watch(() => article.value?.seriesSlug, async slug => {
+  if (!slug) { seriesArticles.value = []; return; }
+  try { const r = await fetchSeriesDetail(slug); if (r.success) seriesArticles.value = r.data.articles; } catch { seriesArticles.value = []; }
+}, { immediate: true });
 const readingMinutes = computed(() => {
   const text = article.value?.rawContent || article.value?.content?.join('') || '';
   const chars = text.replace(/\s+/g, '').length;
@@ -141,6 +176,8 @@ const sanitizeArticleHtml = (html: string) => {
     return next;
   });
 };
+const articleHtml = computed(() => sanitizeArticleHtml(renderMarkdown(articleMarkdown.value)));
+watch(articleHtml, () => { void nextTick(handleArticleHtmlChanged); });
 const requestTocRefresh = () => {
   if (!import.meta.client) return;
   if (tocRefreshFrame) {
@@ -173,7 +210,12 @@ const enhanceArticleExtras = () => {
   if (!import.meta.client) return;
   const root = document.getElementById(mdPreviewId.value);
   if (!root) return;
-  // 图片点击放大由 md-editor-v3 预览内置，这里不再重复绑定（否则会双开/出现两张重复图）。
+  root.querySelectorAll<HTMLImageElement>('img').forEach(img => {
+    if (img.dataset.previewBound) return;
+    img.dataset.previewBound = '1';
+    img.style.cursor = 'zoom-in';
+    img.addEventListener('click', () => window.open(img.currentSrc || img.src, '_blank', 'noopener,noreferrer'));
+  });
   // 图片组（:::bd-gallery）：标注张数用于网格列数；超 9 张折叠，第 9 格盖「+N」点击展开。
   Array.from(root.querySelectorAll<HTMLElement>('.bd-block--gallery')).forEach(gallery => {
     if (gallery.dataset.galleryBound) return;
@@ -186,7 +228,7 @@ const enhanceArticleExtras = () => {
       });
       const more = document.createElement('div');
       more.className = 'gallery-cell bd-gallery-more';
-      more.style.backgroundImage = `url("${imgs[8].src}")`;
+      more.style.backgroundImage = `url("${imgs[8]!.src}")`;
       more.style.backgroundSize = 'cover';
       more.style.backgroundPosition = 'center';
       const overlay = document.createElement('div');
@@ -199,7 +241,7 @@ const enhanceArticleExtras = () => {
         });
         more.remove();
       });
-      imgs[8].parentNode?.insertBefore(more, imgs[8]);
+      imgs[8]!.parentNode?.insertBefore(more, imgs[8]!);
     }
   });
   const pres = Array.from(root.querySelectorAll<HTMLElement>('pre'));
@@ -325,6 +367,7 @@ const onCommentPosted = (event: Event) => {
   if (detail?.articleId === articleId.value) {
     markCommentedLocally(articleId.value);
     hasCommentedBlock.value = true;
+    void refreshDetailForAuth();
   }
 };
 watch([() => userStore.isAuthenticated, hasCommentedBlock, isDark], () => {
@@ -412,20 +455,26 @@ const copyArticleLink = async () => {
 };
 const unlockPassword = ref('');
 const unlocking = ref(false);
+let unlockRequestGeneration = 0;
 const submitUnlock = async () => {
   if (!article.value || !unlockPassword.value || unlocking.value) return;
   unlocking.value = true;
+  const unlockAttempt = ++unlockRequestGeneration;
+  const request = startDetailRequest();
   try {
-    const response = await unlockArticle(articleId.value, unlockPassword.value);
+    const response = await unlockArticle(request.id, unlockPassword.value);
+    if (!detailRequestIsCurrent(request)) return;
     if (response.success) {
       // 整体替换 pageData，确保 article 计算属性可靠刷新（改 .value.article 嵌套属性不一定触发）。
       pageData.value = { ...pageData.value, article: toBlogArticle(response.data) };
+      currentDetailData.value = pageData.value;
       unlockPassword.value = '';
       ElMessage.success('已解锁');
     } else {
       ElMessage.error(response.message || '访问密码错误');
     }
   } catch (error) {
+    if (!detailRequestIsCurrent(request)) return;
     const apiError = error as {
       data?: {
         message?: string;
@@ -438,18 +487,20 @@ const submitUnlock = async () => {
     };
     ElMessage.error(apiError?.data?.message || apiError?.response?._data?.message || '访问密码错误');
   } finally {
-    unlocking.value = false;
+    if (unlockAttempt === unlockRequestGeneration) unlocking.value = false;
   }
 };
 // SSR 阶段无 localStorage 令牌（始终匿名），故登录用户拿到的可能是「锁定」结果。
 // 客户端在已登录且文章被锁定时，带 token 重新拉取，让 登录可见/指定用户/管理员 门控生效。
 const refreshDetailForAuth = async () => {
-  if (!import.meta.client || !isApiArticle.value || !userStore.isAuthenticated) return;
-  if (!article.value?.locked) return;
+  if (!import.meta.client || !isApiArticle.value) return;
+  const request = startDetailRequest();
   try {
-    const response = await fetchArticleDetail(articleId.value);
+    const response = await fetchArticleDetail(request.id);
+    if (!detailRequestIsCurrent(request)) return;
     if (response.success) {
       pageData.value = { ...pageData.value, article: toBlogArticle(response.data) };
+      currentDetailData.value = pageData.value;
     }
   } catch {
     // 拉取失败保持原锁定态
@@ -468,22 +519,46 @@ watch(article, value => {
 }, {
   immediate: true
 });
-watch(() => userStore.isAuthenticated, () => {
+watch([slug, () => userStore.accessToken, () => userStore.tokenName], ([nextSlug], [previousSlug]) => {
+  detailRequestGeneration += 1;
+  unlockRequestGeneration += 1;
+  unlocking.value = false;
+  unlockPassword.value = '';
+  if (nextSlug !== previousSlug) {
+    currentDetailData.value = emptyArticlePageData();
+    pageData.value = emptyArticlePageData();
+    void refreshDetailForAuth();
+    return;
+  }
+  const current = article.value;
+  if (current) {
+    pageData.value = { ...pageData.value, article: { ...current, rawContent: '', content: [], aiSummary: '',
+      locked: ['LOGIN', 'PRIVATE', 'PASSWORD'].includes(current.visibility || '') } };
+    currentDetailData.value = pageData.value;
+  }
   syncEngagementFromArticle();
   void loadEngagementStatus();
   void refreshDetailForAuth();
-});
+}, { flush: 'sync' });
 onMounted(() => {
   if (import.meta.client) {
     defineMusicPlayerElement();
     window.addEventListener('bd:comment-posted', onCommentPosted as EventListener);
     window.addEventListener('scroll', updateReadingProgress, { passive: true });
     updateReadingProgress();
+    if (userStore.isAuthenticated) {
+      void fetchReadingProgress(articleId.value).then(r => { if (r.success) { savedProgress.value = r.data.progress; progressVersion.value = r.data.version; } }).catch(() => {});
+    }
+    void nextTick(handleArticleHtmlChanged);
     void refreshDetailForAuth();
   }
 });
 onUnmounted(() => {
+  detailRequestGeneration += 1;
+  unlockRequestGeneration += 1;
   clearMarkdownRenderTask();
+  if (progressSaveTimer) clearTimeout(progressSaveTimer);
+  void persistProgress();
   if (import.meta.client && tocRefreshFrame) {
     window.cancelAnimationFrame(tocRefreshFrame);
   }
@@ -550,10 +625,10 @@ useHead(() => {
       rel: 'canonical',
       href: articleCanonical.value
     }, ...(heroPreloadHref ? [{
-      rel: 'preload',
-      as: 'image',
+      rel: 'preload' as const,
+      as: 'image' as const,
       href: heroPreloadHref,
-      fetchpriority: 'high'
+      fetchpriority: 'high' as const
     }] : [])],
     meta: [{
       name: 'description',
@@ -643,29 +718,11 @@ useHead(() => {
           </template>
         </section>
 
-        <ClientOnly v-else>
-          <MdPreview
-            v-if="markdownPreviewReady"
-            :key="mdPreviewId"
-            class="article-md-preview"
-            :id="mdPreviewId"
-            :model-value="articleMarkdown"
-            :sanitize="sanitizeArticleHtml"
-            :theme="isDark ? 'dark' : 'light'"
-            preview-theme="github"
-            code-theme="atom"
-            :no-katex="true"
-            :no-mermaid="true"
-            :no-echarts="true"
-            :no-prettier="true"
-            :on-html-changed="handleArticleHtmlChanged"
-          />
-          <ElSkeleton v-else class="article-md-preview" :rows="10" animated />
-          <template #fallback>
-            <ElSkeleton class="article-md-preview" :rows="10" animated />
-          </template>
-        </ClientOnly>
+        <div v-else :key="mdPreviewId" :id="mdPreviewId" class="article-md-preview md-editor-preview" v-html="articleHtml" />
 
+        <button v-if="!article.locked" type="button" @click="markReadLater">加入稍后读</button>
+        <p v-if="savedProgress > 5 && savedProgress < 95"><button type="button" @click="resumeReading">继续上次阅读（{{ Math.round(savedProgress) }}%）</button></p>
+        <nav v-if="article.seriesSlug" aria-label="系列目录"><NuxtLink :to="`/series/${article.seriesSlug}`">系列：{{ article.seriesName }}</NuxtLink><ol><li v-for="item in seriesArticles" :key="item.id"><NuxtLink :to="`/article/${item.id}`" :aria-current="item.id === articleId ? 'page' : undefined">{{ item.title }}</NuxtLink></li></ol></nav>
         <section v-if="!article.locked" class="article-license" aria-label="版权与来源声明">
           <div class="article-license__head">
             <Copyright :size="18" aria-hidden="true" />
@@ -877,7 +934,7 @@ useHead(() => {
   padding: 2px 10px;
   font-size: 12px;
   line-height: 1.6;
-  
+
   color: #fff;
   background: rgba(0, 0, 0, 0.5);
   border: 1px solid rgba(255, 255, 255, 0.25);

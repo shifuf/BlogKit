@@ -6,7 +6,7 @@
           <a-alert :type="totpEnabled ? 'success' : 'warning'" :message="totpEnabled ? '二步验证已启用' : '二步验证未启用'" show-icon />
           <div class="actions">
             <a-button v-if="!totpEnabled" type="primary" @click="startSetup">生成密钥</a-button>
-            <a-button v-else danger @click="disableVisible=true">关闭二步验证</a-button>
+            <template v-else><a-space><a-button @click="startSetup">更换验证器</a-button><a-button @click="generateRecovery">生成恢复码</a-button><a-button danger @click="disableVisible=true">关闭二步验证</a-button></a-space></template>
           </div>
           <div v-if="setup" class="setup-box">
             <p>请在 Microsoft Authenticator、Google Authenticator、1Password 等应用中添加 TOTP 账户。</p>
@@ -30,15 +30,22 @@
         </a-card>
       </a-col>
     </a-row>
-    <a-modal v-model:open="disableVisible" title="关闭二步验证" ok-text="确认关闭" @ok="disableTotpNow"><a-input v-model:value="disableCode" maxlength="6" placeholder="请输入当前动态验证码" /></a-modal>
+    <a-modal v-model:open="proofVisible" title="验证现有二步验证" @ok="submitProof"><a-input v-model:value="proofCode" placeholder="当前验证码或一次性恢复码" autocomplete="one-time-code" /></a-modal>
+    <a-modal v-model:open="recoveryVisible" title="保存恢复码" :footer="null"><a-alert message="恢复码仅显示本次，每码只能使用一次。请离线保存；重新生成会作废旧码。" type="warning" show-icon /><pre style="white-space:pre-wrap">{{ recovery.join('\n') }}</pre><a-button @click="copyRecovery">复制全部恢复码</a-button></a-modal>
+    <a-modal v-model:open="disableVisible" title="关闭二步验证" ok-text="确认关闭" @ok="disableTotpNow"><a-input v-model:value="disableCode" placeholder="当前动态验证码或恢复码" /></a-modal>
   </div>
 </template>
 <script setup>
-import { onMounted, ref } from 'vue'; import { message } from 'ant-design-vue'; import { confirmTotp, disableTotp, getTotpStatus, listSessions, revokeOtherSessions, revokeSession, setupTotp } from '@/api/Auth'; import { formatDateTime } from '@/utils/date';
+import { onMounted, ref } from 'vue'; import { message } from 'ant-design-vue'; import { confirmTotp, disableTotp, getTotpStatus, listSessions, revokeOtherSessions, revokeSession, setupTotp, recoveryCodes } from '@/api/Auth'; import { formatDateTime } from '@/utils/date';
 const totpEnabled=ref(false),setup=ref(null),confirmCode=ref(''),disableCode=ref(''),disableVisible=ref(false),saving=ref(false),loading=ref(false),sessions=ref([]);
 const columns=[{title:'设备',dataIndex:'deviceName'},{title:'首次登录',dataIndex:'createdAt',customRender:({text})=>formatDateTime(text),width:170},{title:'最近活动',dataIndex:'lastSeenAt',customRender:({text})=>formatDateTime(text),width:170},{title:'状态',dataIndex:'active',width:90},{title:'操作',dataIndex:'action',width:70}];
 const loadStatus=async()=>{totpEnabled.value=Boolean((await getTotpStatus()).enabled)}; const loadSessions=async()=>{loading.value=true;try{sessions.value=await listSessions()}finally{loading.value=false}};
-const startSetup=async()=>{setup.value=await setupTotp();confirmCode.value=''}; const confirmSetup=async()=>{if(!/^\d{6}$/.test(confirmCode.value)){message.warning('请输入 6 位验证码');return}saving.value=true;try{await confirmTotp(confirmCode.value);message.success('二步验证已启用');setup.value=null;await loadStatus()}finally{saving.value=false}};
+const proofVisible=ref(false),proofCode=ref(''),proofAction=ref(''),recovery=ref([]),recoveryVisible=ref(false);
+const performSetup=async code=>{setup.value=await setupTotp(code);confirmCode.value=''};
+const startSetup=async()=>{if(totpEnabled.value){proofAction.value='setup';proofCode.value='';proofVisible.value=true}else await performSetup()};
+const generateRecovery=()=>{proofAction.value='recovery';proofCode.value='';proofVisible.value=true};
+const submitProof=async()=>{if(proofAction.value==='setup')await performSetup(proofCode.value);else{recovery.value=await recoveryCodes(proofCode.value);recoveryVisible.value=true}proofVisible.value=false;proofCode.value=''};
+const copyRecovery=async()=>{try{await navigator.clipboard.writeText(recovery.value.join('\n'));message.success('已复制，请安全保存')}catch{message.warning('请手动选择并保存恢复码')}}; const confirmSetup=async()=>{if(!/^\d{6}$/.test(confirmCode.value)){message.warning('请输入 6 位验证码');return}saving.value=true;try{await confirmTotp(confirmCode.value);message.success('二步验证已启用');setup.value=null;await loadStatus()}finally{saving.value=false}};
 const disableTotpNow=async()=>{await disableTotp(disableCode.value);disableVisible.value=false;disableCode.value='';message.success('二步验证已关闭');await loadStatus()};
 const revoke=async id=>{await revokeSession(id);message.success('设备已退出');await loadSessions()};const revokeOthers=async()=>{await revokeOtherSessions();message.success('其它设备已退出');await loadSessions()};
 onMounted(()=>Promise.all([loadStatus(),loadSessions()]));

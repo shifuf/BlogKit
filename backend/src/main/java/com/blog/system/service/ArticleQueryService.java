@@ -43,6 +43,8 @@ public class ArticleQueryService {
     private final CurrentUserService currentUserService;
     private final PasswordEncoder passwordEncoder;
     private final SecretBlockFilter secretBlockFilter;
+    @org.springframework.beans.factory.annotation.Autowired private ArticleAccessGrantService accessGrants;
+    @org.springframework.beans.factory.annotation.Autowired private ArticleMediaService media;
 
     public ArticleQueryService(ArticleRepository articleRepository, SiteSettingRepository siteSettingRepository,
                                CurrentUserService currentUserService, PasswordEncoder passwordEncoder,
@@ -62,7 +64,7 @@ public class ArticleQueryService {
         int safeSize = Math.min(Math.max(size, 1), 50);
         String safeCategorySlug = StringUtils.hasText(categorySlug) ? categorySlug.trim() : null;
         String safeTagSlug = StringUtils.hasText(tagSlug) ? tagSlug.trim() : null;
-        String safeKeyword = StringUtils.hasText(keyword) ? keyword.trim() : null;
+        String safeKeyword = StringUtils.hasText(keyword) ? keyword.trim().substring(0, Math.min(keyword.trim().length(), 120)) : null;
         // 访问控制：公开列表只展示 listedInPublic=true（PUBLIC 恒 true；受控文章按后台开关露出）；管理员可见全部。
         boolean includeAll = isAdminViewer();
         String fallbackAuthorAvatarUrl = defaultProfileAvatarUrl();
@@ -147,7 +149,7 @@ public class ArticleQueryService {
     @Transactional
     public ArticleDetailResponse findPublishedArticle(Long id) {
         Article article = articleRepository.findByIdAndStatusAndDeletedAtIsNull(id, ArticleStatus.PUBLISHED)
-                .orElseThrow(() -> new BusinessException("文章不存在或未发布"));
+                .orElseThrow(() -> new com.blog.system.common.exception.NotFoundException("文章不存在或未发布"));
         boolean canView = canViewContent(article, currentUserService.getCurrentUserOrNull());
         if (canView) {
             articleRepository.incrementViewCount(id);
@@ -160,13 +162,14 @@ public class ArticleQueryService {
     @Transactional
     public ArticleDetailResponse unlockArticle(Long id, String password) {
         Article article = articleRepository.findByIdAndStatusAndDeletedAtIsNull(id, ArticleStatus.PUBLISHED)
-                .orElseThrow(() -> new BusinessException("文章不存在或未发布"));
+                .orElseThrow(() -> new com.blog.system.common.exception.NotFoundException("文章不存在或未发布"));
         UserAccount currentUser = currentUserService.getCurrentUserOrNull();
         boolean canView = canViewContent(article, currentUser)
                 || (article.getVisibility() == ArticleVisibility.PASSWORD && passwordMatches(article, password));
         if (!canView) {
             throw new BusinessException(article.getVisibility() == ArticleVisibility.PASSWORD ? "访问密码错误" : "无权查看该文章");
         }
+        if (article.getVisibility() == ArticleVisibility.PASSWORD) accessGrants.grant(article);
         articleRepository.incrementViewCount(id);
         article.setViewCount(article.getViewCount() + 1);
         return toDetailResponse(article, defaultProfileAvatarUrl(), defaultProfileName(), true);
@@ -191,7 +194,7 @@ public class ArticleQueryService {
         return switch (visibility) {
             case LOGIN -> currentUser != null;
             case PRIVATE -> currentUser != null && article.getAllowedUserIds().contains(currentUser.getId());
-            case PASSWORD -> false; // 仅管理员/作者免密；其余须经 unlockArticle 验密
+            case PASSWORD -> accessGrants != null && accessGrants.hasGrant(article); // 仅管理员/作者免密；其余须经 unlockArticle 验密
             default -> true;
         };
     }
@@ -215,7 +218,7 @@ public class ArticleQueryService {
 
     public ArticleNeighborsResponse findNeighbors(Long id) {
         Article article = articleRepository.findByIdAndStatusAndDeletedAtIsNull(id, ArticleStatus.PUBLISHED)
-                .orElseThrow(() -> new BusinessException("文章不存在或未发布"));
+                .orElseThrow(() -> new com.blog.system.common.exception.NotFoundException("文章不存在或未发布"));
         OffsetDateTime pivot = article.getPublishedAt() == null ? article.getCreatedAt() : article.getPublishedAt();
         if (pivot == null) {
             return new ArticleNeighborsResponse(null, null);
@@ -283,7 +286,7 @@ public class ArticleQueryService {
 
     public List<ArticleSummaryResponse> findRelatedArticles(Long id, int size) {
         Article article = articleRepository.findByIdAndStatusAndDeletedAtIsNull(id, ArticleStatus.PUBLISHED)
-                .orElseThrow(() -> new BusinessException("文章不存在或未发布"));
+                .orElseThrow(() -> new com.blog.system.common.exception.NotFoundException("文章不存在或未发布"));
         int safeSize = Math.min(Math.max(size, 1), 8);
         var pageable = PageRequest.of(0, safeSize, Sort.by(
                 Sort.Order.desc("sticky"),
@@ -317,17 +320,20 @@ public class ArticleQueryService {
     }
 
     private ArticleSummaryResponse toSummaryResponse(Article article, String fallbackAuthorAvatarUrl, String fallbackAuthorName, String keyword) {
+        UserAccount viewer = currentUserService.getCurrentUserOrNull();
+        String publicSummary = (viewer != null || article.getVisibility() == ArticleVisibility.PUBLIC)
+                && canViewContent(article, viewer) ? SecretBlockFilter.safeSummary(article.getContent(),article.getSummary()) : "";
         String titleHl = null;
         String summaryHl = null;
         if (StringUtils.hasText(keyword)) {
             titleHl = highlightText(article.getTitle(), keyword);
             // 高亮只允许用 title/summary，禁止回退到 content，避免 listed 的受控文通过搜索泄正文。
-            summaryHl = highlightSnippet(article.getSummary(), keyword, 160);
+            summaryHl = highlightSnippet(publicSummary, keyword, 160);
         }
         return new ArticleSummaryResponse(
                 article.getId(),
                 article.getTitle(),
-                article.getSummary(),
+                publicSummary,
                 article.getCoverImageUrl(),
                 article.getCoverColor(),
                 article.getCategory().getName(),
@@ -399,10 +405,11 @@ public class ArticleQueryService {
             Long authorId = article.getAuthor() == null ? null : article.getAuthor().getId();
             content = secretBlockFilter.filter(
                     content, article.getId(), currentUserService.getCurrentUserOrNull(), authorId);
+            if(media!=null) content=media.decorate(article,content);
         }
-        String summary = locked ? "" : article.getSummary();
+        String summary = locked ? "" : SecretBlockFilter.safeSummary(article.getContent(),article.getSummary());
         // AI 摘要仅在「开启展示 + 已生成 + 未锁定」时下发；否则置 null，前台不渲染摘要卡片，也不泄露受控文章内容。
-        String aiSummary = (!locked && article.isAiSummaryEnabled() && StringUtils.hasText(article.getAiSummary()))
+        String aiSummary = (!locked && !article.getContent().contains("bd-secret") && article.isAiSummaryEnabled() && StringUtils.hasText(article.getAiSummary()))
                 ? article.getAiSummary()
                 : null;
         return new ArticleDetailResponse(
@@ -430,7 +437,11 @@ public class ArticleQueryService {
                 article.getPublishedAt(),
                 visibility,
                 locked,
-                locked && visibility == ArticleVisibility.PASSWORD
+                locked && visibility == ArticleVisibility.PASSWORD,
+                article.getSeries() == null ? null : article.getSeries().getId(),
+                article.getSeries() == null ? null : article.getSeries().getSlug(),
+                article.getSeries() == null ? null : article.getSeries().getName(),
+                article.getSeriesOrder(), article.getVersion()
         );
     }
 

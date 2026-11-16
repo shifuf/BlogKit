@@ -127,6 +127,7 @@
                       </li>
                     </ul>
 
+                    <button v-if="(c.replies?.length || 0) < (c.replyCount || 0)" type="button" @click="loadDynamicReplies(item, c)">加载更多回复</button>
                     <!-- 回复输入框：每个根评论下一个，回复根或其下回复时都在此显示 -->
                     <div v-if="eng(item.id).reply.rootId === c.id" class="dc-reply-form">
                       <input
@@ -167,7 +168,7 @@
     </ul>
 
     <div v-if="showLoadMore" class="moment-load-more">
-      <button type="button" class="load-more-btn" @click="loadMoreItems">
+      <button type="button" class="load-more-btn" :disabled="loading" @click="loadMoreItems">
         加载更多
       </button>
     </div>
@@ -184,9 +185,9 @@ import { getGuestKey } from '~/utils/blog-blocks';
 import { buildAvatarUrl } from '~/utils/blog-adapter';
 const {
   fetchDynamics,
-  fetchDynamicLikeStatus,
   toggleDynamicLike,
   fetchDynamicComments,
+  fetchDynamicReplies,
   postDynamicComment
 } = useApiClient();
 const {
@@ -196,7 +197,8 @@ const {
 await loadSiteSettings();
 const loading = ref(false);
 const pageSize = 5;
-const visibleCount = ref(pageSize);
+const currentPage = ref(1);
+const totalDynamics = ref(0);
 const items = ref<DynamicPost[]>([]);
 useHead({
   title: computed(() => `动态 - ${siteSettings.value.siteName || '我的博客'}`)
@@ -236,8 +238,8 @@ const parsedItems = computed(() => items.value.map(item => ({
 const relativeTime = (value?: string | null) => formatRelativeTime(value);
 const absoluteTime = (value?: string | null) => formatDateTime(value);
 const postTimeSource = (item: DynamicPost) => item.publishedAt || item.createdAt;
-const visibleItems = computed(() => parsedItems.value.slice(0, visibleCount.value));
-const hasMoreItems = computed(() => parsedItems.value.length > visibleCount.value);
+const visibleItems = computed(() => parsedItems.value);
+const hasMoreItems = computed(() => items.value.length < totalDynamics.value);
 const showLoadMore = computed(() => hasMoreItems.value);
 const locationNameByRaw = reactive<Record<string, string>>({});
 const resolvingLocations = new Set<string>();
@@ -260,7 +262,7 @@ const isCoordinatePair = (value: string): [number, number] | null => {
 
 const isCoordinateFallback = (value: string) => /^经纬度\s/.test(value.trim());
 
-const normalizeAmapPart = (value: unknown) => {
+const normalizeAmapPart = (value: unknown): string => {
   if (Array.isArray(value)) return value.map(normalizeAmapPart).filter(Boolean).join('');
   return String(value || '').trim();
 };
@@ -409,13 +411,24 @@ const hydrateLocationNames = async () => {
   const cache = readLocationCache();
   Object.assign(locationNameByRaw, cache);
   const uniqRaw = Array.from(new Set(items.value.map(item => String(item.location || '').trim()).filter(Boolean)));
-  await Promise.all(uniqRaw.map(item => requestLocationName(item)));
+  for (let i = 0; i < uniqRaw.length; i += 3) {
+    await Promise.allSettled(uniqRaw.slice(i, i + 3).map(item => requestLocationName(item)));
+  }
 };
 
-const loadMoreItems = () => {
-  if (!hasMoreItems.value) return;
-  const nextCount = visibleCount.value + pageSize;
-  visibleCount.value = Math.min(nextCount, parsedItems.value.length);
+const loadMoreItems = async () => {
+  if (loading.value || !hasMoreItems.value) return;
+  loading.value = true;
+  try {
+    const response = await fetchDynamics(currentPage.value, pageSize, getGuestKey());
+    if (response.success) {
+      items.value.push(...response.data.items);
+      totalDynamics.value = response.data.totalItems;
+      currentPage.value += 1;
+      response.data.items.forEach(ensureEngagement);
+      void hydrateLocationNames();
+    }
+  } finally { loading.value = false; }
 };
 // 长文折叠：正文较长(字数或行数超阈值)时默认折叠，提供「阅读更多/收起」。
 const expandedSet = reactive<Set<number>>(new Set());
@@ -512,7 +525,7 @@ const engagement = reactive<Record<number, MomentEngagement>>({});
 const ensureEngagement = (item: DynamicPost) => {
   if (!engagement[item.id]) {
     engagement[item.id] = {
-      liked: false,
+      liked: Boolean(item.liked),
       likeCount: Number(item.likeCount || 0),
       commentCount: Number(item.commentCount || 0),
       open: false,
@@ -525,9 +538,9 @@ const ensureEngagement = (item: DynamicPost) => {
       reply: newReplyState()
     };
   }
-  return engagement[item.id];
+  return engagement[item.id]!;
 };
-const eng = (id: number) => engagement[id];
+const eng = (id: number) => engagement[id]!;
 // 评论头像首字母（与文章评论 initial() 一致的观感）。
 const commentInitial = (name?: string) => {
   const text = String(name || '').trim();
@@ -559,6 +572,21 @@ const loadComments = async (item: DynamicPost, append = false) => {
   } catch {} finally {
     state.loadingComments = false;
   }
+};
+const dynamicReplyPages = ref<Record<number, number>>({});
+const dynamicReplyLoading = new Set<number>();
+const loadDynamicReplies = async (item: DynamicPost, root: DynamicComment) => {
+  if (dynamicReplyLoading.has(root.id)) return;
+  dynamicReplyLoading.add(root.id);
+  try {
+    const page = dynamicReplyPages.value[root.id] || 0;
+    const response = await fetchDynamicReplies(item.id, root.id, page, 10);
+    if (response.success) {
+      root.replies = page ? [...(root.replies || []), ...response.data.items] : response.data.items;
+      root.replyCount = response.data.totalItems;
+      dynamicReplyPages.value[root.id] = page + 1;
+    }
+  } finally { dynamicReplyLoading.delete(root.id); }
 };
 const loadMoreComments = (item: DynamicPost) => loadComments(item, true);
 const toggleComments = async (item: DynamicPost) => {
@@ -636,31 +664,16 @@ const submitReply = async (item: DynamicPost) => {
     reply.submitting = false;
   }
 };
-const loadEngagementStatuses = async () => {
-  const key = getGuestKey();
-  await Promise.all(items.value.map(async item => {
-    const state = ensureEngagement(item);
-    try {
-      const res = await fetchDynamicLikeStatus(item.id, key);
-      if (res.success) {
-        state.liked = res.data.liked;
-        state.likeCount = res.data.likeCount;
-      }
-    } catch {}
-  }));
-};
 // 首屏列表改为 SSR 期 fetch（useAsyncData）：服务端直出 HTML，配合 routeRules 的 swr:30 让 nitro 缓存真正命中、首屏不再闪空壳。
 // 注意：回调内只做纯 $fetch，不碰 window/localStorage/AMap，保证 SSR 不报错。
-const { data: initialDynamics } = await useAsyncData<DynamicPost[]>('dynamics-list', async () => {
-  const response = await fetchDynamics();
-  return response.success ? response.data : [];
-}, {
-  default: () => [] as DynamicPost[]
-});
-items.value = initialDynamics.value || [];
+const { data: initialDynamics } = await useAsyncData('dynamics-list', async () => {
+  const response = await fetchDynamics(0, pageSize);
+  return response.success ? response.data : { items: [], totalItems: 0 };
+}, { default: () => ({ items: [] as DynamicPost[], totalItems: 0 }) });
+items.value = initialDynamics.value.items;
+totalDynamics.value = initialDynamics.value.totalItems;
 // engagement 初始化是纯响应式赋值（无浏览器依赖），服务端/客户端一致执行，避免互动区块水合不一致。
 items.value.forEach(ensureEngagement);
-visibleCount.value = pageSize;
 // 浏览器专属增强：定位逆地理（localStorage + AMap/网络）与游客点赞状态（guestKey 取自 localStorage），仅客户端执行，不影响首屏 HTML。
 onMounted(async () => {
   rememberedGuestName.value = readGuestAuthor();
@@ -671,7 +684,10 @@ onMounted(async () => {
     }
   });
   await hydrateLocationNames();
-  void loadEngagementStatuses();
+  const response = await fetchDynamics(0, pageSize, getGuestKey());
+  if (response.success) {
+    response.data.items.forEach(item => { const state = ensureEngagement(item); state.liked = Boolean(item.liked); });
+  }
 });
 </script>
 

@@ -546,3 +546,5 @@
 .bd-secret {
   margin: 8rpx 0;
 }
+
+.comment__reply-context { padding: 12rpx 16rpx; margin: 10rpx 0; border-left: 4rpx solid #8c9eff; background: rgba(125,125,125,.08); color: #888; font-size: 24rpx; }

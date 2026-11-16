@@ -42,6 +42,19 @@ public class DynamicEngagementService {
         this.currentUserService = currentUserService;
     }
 
+    @Transactional(readOnly = true)
+    public PageResponse<com.blog.system.web.dto.DynamicPostView> listPosts(int page, int size, String guestKey) {
+        var result = dynamicPostRepository.findByVisibleTrue(PageRequest.of(Math.max(page, 0), Math.min(Math.max(size, 1), 50),
+                org.springframework.data.domain.Sort.by("displayOrder").ascending().and(org.springframework.data.domain.Sort.by("publishedAt", "id").descending())));
+        var ids = result.getContent().stream().map(DynamicPost::getId).toList();
+        var liked = !ids.isEmpty() && StringUtils.hasText(guestKey)
+                ? guestLikeRepository.findLikedIds(normalizeGuestKey(guestKey), ids) : java.util.Set.<Long>of();
+        return new PageResponse<>(result.getContent().stream().map(p -> new com.blog.system.web.dto.DynamicPostView(
+                p.getId(), p.getTitle(), p.getContent(), p.getLocation(), p.getDisplayOrder(), p.getLikeCount(), p.getCommentCount(),
+                p.getPublishedAt(), p.getCreatedAt(), p.getUpdatedAt(), liked.contains(p.getId()))).toList(),
+                result.getNumber(), result.getSize(), result.getTotalElements(), result.getTotalPages());
+    }
+
     private String normalizeGuestKey(String guestKey) {
         if (!StringUtils.hasText(guestKey)) {
             throw new BusinessException("缺少访客标识");
@@ -104,7 +117,7 @@ public class DynamicEngagementService {
         Map<Long, List<DynamicCommentResponse>> repliesByRoot = new HashMap<>();
         if (!roots.isEmpty()) {
             List<Long> rootIds = roots.stream().map(DynamicComment::getId).toList();
-            for (DynamicComment reply : commentRepository.findByParent_IdInAndVisibleTrueOrderByCreatedAtAsc(rootIds)) {
+            for (DynamicComment reply : commentRepository.findReplyPreviews(rootIds)) {
                 Long rootId = reply.getParent().getId();
                 repliesByRoot.computeIfAbsent(rootId, k -> new ArrayList<>())
                         .add(new DynamicCommentResponse(
@@ -119,6 +132,16 @@ public class DynamicEngagementService {
                         repliesByRoot.getOrDefault(root.getId(), List.of())))
                 .toList();
         return new PageResponse<>(items, safePage, safeSize, rootPage.getTotalElements(), rootPage.getTotalPages());
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<DynamicCommentResponse> replies(Long dynamicId, Long rootId, int page, int size) {
+        requireVisiblePost(dynamicId);
+        var root=commentRepository.findById(rootId).orElseThrow(()->new BusinessException("评论不存在"));
+        if (!dynamicId.equals(root.getDynamic().getId()) || root.getParent()!=null || !root.isVisible()) throw new BusinessException("评论不存在");
+        var result=commentRepository.findByParent_IdAndVisibleTrueOrderByCreatedAtAscIdAsc(rootId,PageRequest.of(Math.max(0,page),Math.max(1,Math.min(50,size))));
+        return new PageResponse<>(result.getContent().stream().map(c -> new DynamicCommentResponse(c.getId(),c.getAuthorName(),c.getContent(),c.getCreatedAt(),rootId,c.getReplyTo(),c.getRegion(),0,List.of())).toList(),
+                result.getNumber(),result.getSize(),result.getTotalElements(),result.getTotalPages());
     }
 
     @Transactional
@@ -147,14 +170,13 @@ public class DynamicEngagementService {
         if (parentId != null) {
             DynamicComment target = commentRepository.findById(parentId)
                     .orElseThrow(() -> new BusinessException("回复的评论不存在"));
-            if (target.getDynamic() == null || !dynamicId.equals(target.getDynamic().getId())) {
+            if (!target.isVisible() || target.getDynamic() == null || !dynamicId.equals(target.getDynamic().getId())) {
                 throw new BusinessException("回复的评论不属于当前动态");
             }
             DynamicComment root = target.getParent() != null ? target.getParent() : target;
             comment.setParent(root);
             comment.setReplyTo(target.getAuthorName());
-            root.setReplyCount(root.getReplyCount() + 1);
-            commentRepository.save(root);
+            commentRepository.adjustReplyCount(root.getId(), 1);
         }
         commentRepository.save(comment);
         dynamicPostRepository.incrementCommentCount(dynamicId);
@@ -215,8 +237,7 @@ public class DynamicEngagementService {
             removed += replies.size();
         } else {
             DynamicComment root = comment.getParent();
-            root.setReplyCount(Math.max(0, root.getReplyCount() - 1));
-            commentRepository.save(root);
+            commentRepository.adjustReplyCount(root.getId(), -1);
         }
         commentRepository.delete(comment);
         if (post != null && post.getId() != null) {
@@ -245,8 +266,7 @@ public class DynamicEngagementService {
                 removed += replies.size();
             } else {
                 DynamicComment root = comment.getParent();
-                root.setReplyCount(Math.max(0, root.getReplyCount() - 1));
-                commentRepository.save(root);
+                commentRepository.adjustReplyCount(root.getId(), -1);
             }
             commentRepository.delete(comment);
             if (post != null && post.getId() != null) {

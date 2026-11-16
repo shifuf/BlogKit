@@ -35,20 +35,28 @@ public class DownloadService {
     private final ArticleCommentRepository commentRepository;
     private final DownloadAccessLogRepository accessLogRepository;
     private final ObjectMapper objectMapper;
+    private final com.blog.system.repository.ArticleRepository articleRepository;
+    private final ArticleQueryService articleQueryService;
+    private final CurrentUserService currentUserService;
+    @org.springframework.beans.factory.annotation.Autowired private UnifiedFileManagerClient fileManager;
+    @org.springframework.beans.factory.annotation.Autowired private org.springframework.transaction.support.TransactionTemplate transactions;
 
     public DownloadService(
             DownloadCipher downloadCipher,
             ArticleCommentRepository commentRepository,
             DownloadAccessLogRepository accessLogRepository,
-            ObjectMapper objectMapper
+            ObjectMapper objectMapper, com.blog.system.repository.ArticleRepository articleRepository,
+            ArticleQueryService articleQueryService, CurrentUserService currentUserService
     ) {
         this.downloadCipher = downloadCipher;
         this.commentRepository = commentRepository;
         this.accessLogRepository = accessLogRepository;
-        this.objectMapper = objectMapper;
+        this.objectMapper = objectMapper; this.articleRepository=articleRepository; this.articleQueryService=articleQueryService; this.currentUserService=currentUserService;
     }
 
     public String seal(DownloadResource resource) {
+        if (resource.articleId() == null || !articleRepository.existsById(resource.articleId())) throw new BusinessException("请先保存文章，再生成下载卡片");
+        if (!java.util.Set.of("none","login","comment").contains(StringUtils.hasText(resource.gate())?resource.gate():"none")) throw new BusinessException("下载权限类型无效");
         try {
             return downloadCipher.seal(objectMapper.writeValueAsString(resource));
         } catch (JsonProcessingException e) {
@@ -57,7 +65,26 @@ public class DownloadService {
     }
 
     public DownloadResource open(String token, String clientIp) {
+        DownloadResource resource = transactions == null ? authorize(token, clientIp) : transactions.execute(status -> authorize(token, clientIp));
+        var items = resource.items() == null ? null : resource.items().stream().map(item -> new DownloadResource.DownloadItem(item.platform(), item.name(), temporaryUrl(item.url()), item.code())).toList();
+        var button = resource.button() == null ? null : new DownloadResource.ButtonConfig(resource.button().text(), resource.button().icon(), temporaryUrl(resource.button().url()), resource.button().color());
+        return new DownloadResource(resource.kind(), resource.gate(), resource.articleId(), resource.title(), resource.description(), items, button);
+    }
+
+    private String temporaryUrl(String url) {
+        String id = fileManager == null ? null : fileManager.resolveManagedFileId(url);
+        return id == null ? url : fileManager.getTemporaryAccessUrl(id);
+    }
+
+    private DownloadResource authorize(String token, String clientIp) {
         DownloadResource resource = decrypt(token);
+        if(resource.articleId()==null) throw new ForbiddenException("下载资源尚未绑定文章，请保存文章后重新生成资源");
+        var article=articleRepository.findByIdAndStatusAndDeletedAtIsNull(resource.articleId(),com.blog.system.domain.article.ArticleStatus.PUBLISHED)
+                .orElseThrow(()->new ForbiddenException("文章不存在或已下架"));
+        if(!articleQueryService.canViewContent(article,currentUserService.getCurrentUserOrNull()))
+            throw new ForbiddenException("无权访问此文章的下载资源");
+        if(article.getContent()==null || !article.getContent().contains(token))
+            throw new ForbiddenException("下载资源已被移除或更新");
         enforceGate(resource);
         recordAccess(resource, clientIp);
         return resource;

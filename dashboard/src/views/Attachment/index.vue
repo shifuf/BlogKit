@@ -4,6 +4,7 @@
       <template #title>附件管理</template>
       <template #extra>
         <a-space wrap>
+          <a-checkbox v-model:checked="uploadPublic" :disabled="uploading">图片公开访问</a-checkbox>
           <a-upload :show-upload-list="false" :custom-request="handleUpload" :disabled="uploading">
             <a-button type="primary" :loading="uploading">{{ uploading ? '上传中…' : '上传附件' }}</a-button>
           </a-upload>
@@ -28,6 +29,7 @@
         </a-space>
       </template>
 
+      <a-alert style="margin-bottom:16px" type="info" show-icon message="默认上传私有素材。勾选公开访问后，图片可独立于文章权限访问；文档等通用附件始终保持私有。" />
       <a-table
         row-key="id"
         :columns="columns"
@@ -42,10 +44,10 @@
             <a-image
               v-if="isImage(record)"
               class="asset-preview"
-              :src="assetUrl(record.url)"
+              :src="assetUrl(record.previewUrl || record.url)"
               :width="72"
               :height="48"
-              :preview="{ src: assetUrl(record.url) }"
+              :preview="{ src: assetUrl(record.previewUrl || record.url) }"
             />
             <a-tag v-else class="asset-file-tag">{{ fileTypeLabel(record) }}</a-tag>
           </template>
@@ -87,6 +89,7 @@ import { uploadAnyWithOptionalCrop, uploadImageWithCrop } from '@/utils/imageCro
 import { formatDateTime } from '@/utils/date';
 const loading = ref(false);
 const uploading = ref(false);
+const uploadPublic = ref(false);
 const batchDeleting = ref(false);
 const selectedRowKeys = ref([]);
 const attachments = ref([]);
@@ -159,7 +162,7 @@ const loadAttachments = async () => {
 const handleUpload = async ({ file, onSuccess, onError }) => {
   uploading.value = true;
   try {
-    const result = await uploadAnyWithOptionalCrop(file);
+    const result = await uploadAnyWithOptionalCrop(file, { publicAccess: uploadPublic.value });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;
@@ -179,7 +182,7 @@ const handleUpload = async ({ file, onSuccess, onError }) => {
 const handleImageUpload = async ({ file, onSuccess, onError }) => {
   uploading.value = true;
   try {
-    const result = await uploadImageWithCrop(file);
+    const result = await uploadImageWithCrop(file, { publicAccess: uploadPublic.value });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;
@@ -237,7 +240,7 @@ const copyUrl = async record => {
   message.success('URL 已复制');
 };
 const openAsset = record => {
-  window.open(assetUrl(record.url), '_blank');
+  window.open(assetUrl(record.previewUrl || record.url), '_blank');
 };
 const removeAttachment = async record => {
   await deleteAttachment(record.id);

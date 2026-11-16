@@ -65,8 +65,10 @@ public class PublicSystemController {
     }
 
     @GetMapping("/dynamics")
-    public ApiResponse<List<DynamicPost>> listDynamics() {
-        return ApiResponse.ok(systemManagementService.listPublicDynamics());
+    public ApiResponse<PageResponse<com.blog.system.web.dto.DynamicPostView>> listDynamics(
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "20") int size,
+            @RequestParam(required = false) String guestKey) {
+        return ApiResponse.ok(dynamicEngagementService.listPosts(page, size, guestKey));
     }
 
     // 动态游客点赞：切换点赞/取消，返回最新状态与计数。
@@ -102,6 +104,12 @@ public class PublicSystemController {
             @RequestParam(defaultValue = "10") int size
     ) {
         return ApiResponse.ok(dynamicEngagementService.listComments(id, page, size));
+    }
+
+    @GetMapping("/dynamics/{id}/comments/{rootId}/replies")
+    public ApiResponse<PageResponse<DynamicCommentResponse>> dynamicReplies(@PathVariable Long id,@PathVariable Long rootId,
+            @RequestParam(defaultValue="0") int page,@RequestParam(defaultValue="10") int size) {
+        return ApiResponse.ok(dynamicEngagementService.replies(id,rootId,page,size));
     }
 
     @PostMapping("/dynamics/{id}/comments")

@@ -28,11 +28,12 @@ export const useApiClient = () => {
       signal
     });
   };
+  const requestCookies = import.meta.server ? useRequestHeaders(['cookie', 'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host']) : {};
   const fetchArticleDetail = (id: number) => {
     return $fetch<ApiResponse<ArticleDetail>>(`/articles/${id}`, {
       baseURL: config.public.apiBaseUrl,
-      // 携带登录态，使登录可见/指定用户/管理员的访问控制门控对当前用户生效。
-      headers: authHeaders()
+      // Preserve HttpOnly article grants when fetching from SSR.
+      headers: { ...requestCookies, ...authHeaders() }
     });
   };
   const fetchArticlePreview = (token: string) => {
@@ -82,6 +83,7 @@ export const useApiClient = () => {
       baseURL: config.public.apiBaseUrl
     });
   };
+  const fetchTagSummary = () => $fetch<ApiResponse<{ tags: TagSummary[]; totalArticles: number }>>('/tags/summary', { baseURL: config.public.apiBaseUrl });
   const fetchTags = () => {
     return $fetch<ApiResponse<TagSummary[]>>('/tags', {
       baseURL: config.public.apiBaseUrl
@@ -92,11 +94,16 @@ export const useApiClient = () => {
       baseURL: config.public.apiBaseUrl
     });
   };
-  const fetchDynamics = () => {
-    return $fetch<ApiResponse<DynamicPost[]>>('/dynamics', {
-      baseURL: config.public.apiBaseUrl
+  const fetchDynamics = (page = 0, size = 5, guestKey?: string) => {
+    return $fetch<ApiResponse<PageResponse<DynamicPost>>>('/dynamics', {
+      baseURL: config.public.apiBaseUrl, query: { page, size, guestKey }, headers: authHeaders()
     });
   };
+  const fetchSeries = () => $fetch<ApiResponse<Array<{ id: number; name: string; slug: string; description: string; articleCount: number }>>>('/series', { baseURL: config.public.apiBaseUrl });
+  const fetchSeriesDetail = (slug: string) => $fetch<ApiResponse<{ series: { id: number; name: string; description: string }; articles: ArticleSummary[] }>>(`/series/${encodeURIComponent(slug)}`, { baseURL: config.public.apiBaseUrl, headers: authHeaders() });
+  const fetchReadingProgress = (id: number) => $fetch<ApiResponse<{ progress: number; completed: boolean; later?: boolean; version?: number }>>(`/reading-progress/${id}`, { baseURL: config.public.apiBaseUrl, headers: authHeaders() });
+  const saveReadingProgress = (id: number, body: { progress: number; completed: boolean; later?: boolean; version?: number }) => $fetch<ApiResponse<{ progress: number; completed: boolean; later?: boolean; version?: number }>>(`/reading-progress/${id}`, { baseURL: config.public.apiBaseUrl, method: 'PUT', body, headers: authHeaders() });
+  const fetchReadingHistory = (page = 0, size = 20, state?: string) => $fetch<ApiResponse<PageResponse<{ articleId: number; title: string; progress: number; completed: boolean; later: boolean; updatedAt: string }>>>('/reading-progress', { baseURL: config.public.apiBaseUrl, query: { page, size, state: state === 'all' ? undefined : state }, headers: authHeaders() });
   const fetchVisitorLocation = () => {
     return $fetch<ApiResponse<{ region: string }>>('/meta/visitor-location', {
       baseURL: config.public.apiBaseUrl
@@ -121,6 +128,10 @@ export const useApiClient = () => {
       query: { page, size }
     });
   };
+  const fetchDynamicReplies = (id: number, rootId: number, page = 0, size = 10) =>
+    $fetch<ApiResponse<PageResponse<DynamicComment>>>(`/dynamics/${id}/comments/${rootId}/replies`, {
+      baseURL: config.public.apiBaseUrl, query: { page, size }
+    });
   const postDynamicComment = (id: number, payload: { authorName: string; content: string; guestKey: string; parentId?: number | null }) => {
     return $fetch<ApiResponse<DynamicComment>>(`/dynamics/${id}/comments`, {
       baseURL: config.public.apiBaseUrl,
@@ -159,20 +170,23 @@ export const useApiClient = () => {
       body: payload
     });
   };
-  const fetchOAuthAuthorizeUrl = (payload: {
-    callbackOrigin: string;
-    redirect?: string;
-  }) => {
+  const oauthHeaders = () => {
+    if (!import.meta.client) return authHeaders();
+    let browser = sessionStorage.getItem('blog-oauth-browser');
+    if (!browser) {
+      browser = Array.from(crypto.getRandomValues(new Uint8Array(32)), n => n.toString(16).padStart(2, '0')).join('');
+      sessionStorage.setItem('blog-oauth-browser', browser);
+    }
+    return { ...authHeaders(), 'X-OAuth-Browser': browser };
+  };
+  const fetchOAuthAuthorizeUrl = (payload: { callbackOrigin: string; redirect?: string; bind?: boolean }) => {
     return $fetch<ApiResponse<OAuthAuthorizePayload>>('/auth/oauth/authorize', {
-      baseURL: config.public.apiBaseUrl,
-      query: payload
+      baseURL: config.public.apiBaseUrl, query: payload, headers: oauthHeaders()
     });
   };
   const loginWithOAuthCode = (payload: OAuthCallbackPayload) => {
     return $fetch<ApiResponse<OAuthLoginPayload>>('/auth/oauth/callback', {
-      baseURL: config.public.apiBaseUrl,
-      method: 'POST',
-      body: payload
+      baseURL: config.public.apiBaseUrl, method: 'POST', body: payload, headers: oauthHeaders()
     });
   };
   const register = (payload: RegisterPayload) => {
@@ -259,6 +273,11 @@ export const useApiClient = () => {
       headers: authHeaders()
     });
   };
+  const fetchCommentReplies = (commentId: number, page = 0, size = 10) => {
+    return $fetch<ApiResponse<PageResponse<CommentSummary>>>(`/comments/${commentId}/replies`, {
+      baseURL: config.public.apiBaseUrl, query: { page, size }, headers: authHeaders()
+    });
+  };
   const likeArticle = (articleId: number, guestKey?: string) => {
     return $fetch<ApiResponse<EngagementState>>(`/articles/${articleId}/like`, {
       baseURL: config.public.apiBaseUrl,
@@ -321,7 +340,7 @@ export const useApiClient = () => {
     });
   };
   const reportComment = (commentId: number) => {
-    return $fetch<ApiResponse<CommentSummary>>(`/comments/${commentId}/report`, {
+    return $fetch<ApiResponse<null>>(`/comments/${commentId}/report`, {
       baseURL: config.public.apiBaseUrl,
       method: 'POST',
       headers: authHeaders()
@@ -378,17 +397,25 @@ export const useApiClient = () => {
     fetchArticleArchiveYears,
     fetchCategories,
     fetchTags,
+    fetchTagSummary,
     fetchSiteSettings,
     fetchDynamics,
+    fetchSeries,
+    fetchSeriesDetail,
+    fetchReadingProgress,
+    saveReadingProgress,
+    fetchReadingHistory,
     fetchVisitorLocation,
     fetchDynamicLikeStatus,
     toggleDynamicLike,
     fetchDynamicComments,
+    fetchDynamicReplies,
     postDynamicComment,
     fetchFriendLinks,
     fetchFriendLinkCaptcha,
     applyFriendLink,
     fetchComments,
+    fetchCommentReplies,
     createComment,
     toggleCommentLike,
     deleteComment,

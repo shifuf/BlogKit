@@ -1,69 +1,11 @@
 <script setup lang="ts">
-import { applyBlogContainer } from '~/utils/blog-markdown';
+import { renderMarkdown } from '~/utils/render-markdown';
 import { defineMusicPlayerElement } from '~/utils/define-music-player';
-import { sanitizeArticleHtml } from '~/utils/sanitize-html';
-// 与文章详情/后台编辑器同一套 md-editor-v3 渲染，保证动态正文与后台所见一致。
-const props = defineProps<{
-  content?: string;
-}>();
-const { isDark } = useTheme();
-const ready = ref(false);
-const previewId = `bmd-${useId()}`;
-const sanitizeContent = (html: string) => sanitizeArticleHtml(html);
-const MdPreview = defineAsyncComponent(async () => {
-  // 确保在首次渲染 Markdown 前自定义元素已注册。
-  defineMusicPlayerElement();
-  const [module] = await Promise.all([
-    import('md-editor-v3'),
-    import('md-editor-v3/lib/preview.css')
-  ]);
-  module.config({
-    editorExtensions: {
-      highlight: {
-        js: '/vendor/highlightjs/highlight.min.js',
-        css: {
-          atom: {
-            light: '/vendor/highlightjs/styles/atom-one-light.min.css',
-            dark: '/vendor/highlightjs/styles/atom-one-dark.min.css'
-          }
-        }
-      }
-    },
-    markdownItConfig(md: unknown) {
-      applyBlogContainer(md as never);
-    }
-  });
-  return module.MdPreview;
-});
-
-onMounted(() => {
-  defineMusicPlayerElement();
-  ready.value = true;
-});
+const props = defineProps<{ content?: string }>();
+const html = computed(() => renderMarkdown(props.content || ''));
+onMounted(() => defineMusicPlayerElement());
 </script>
-
-<template>
-  <ClientOnly>
-    <MdPreview
-      v-if="ready && content"
-      :id="previewId"
-      class="blog-md-preview"
-      :model-value="content"
-      :sanitize="sanitizeContent"
-      :theme="isDark ? 'dark' : 'light'"
-      preview-theme="github"
-      code-theme="atom"
-      :no-katex="true"
-      :no-mermaid="true"
-      :no-echarts="true"
-      :no-prettier="true"
-    />
-    <div v-else-if="content" class="blog-md-preview blog-md-preview--fallback" />
-    <template #fallback>
-      <div class="blog-md-preview blog-md-preview--fallback" />
-    </template>
-  </ClientOnly>
-</template>
+<template><div class="blog-md-preview md-editor-preview" v-html="html" /></template>
 
 <style scoped lang="scss">
 .blog-md-preview {

@@ -49,7 +49,9 @@ public class AuthController {
     @PostMapping("/register")
     public ApiResponse<LoginResponse> register(@Valid @RequestBody RegisterRequest request, HttpServletRequest httpRequest) {
         requireRateLimit("auth:register:" + clientIpResolver.resolve(httpRequest), 5, 3_600_000);
-        return ApiResponse.ok("注册成功", authService.register(request));
+        var response = authService.register(request);
+        loginSessionService.record(response, httpRequest);
+        return ApiResponse.ok("注册成功", response);
     }
 
     @PostMapping("/login")
@@ -64,7 +66,9 @@ public class AuthController {
     public ApiResponse<LoginResponse> loginWithWechatMiniProgram(@Valid @RequestBody WechatMiniProgramLoginRequest request,
                                                                   HttpServletRequest httpRequest) {
         requireRateLimit("auth:wechat:" + clientIpResolver.resolve(httpRequest), 10, 300_000);
-        return ApiResponse.ok("登录成功", authService.loginWithWechatMiniProgram(request));
+        var response = authService.loginWithWechatMiniProgram(request);
+        loginSessionService.record(response, httpRequest);
+        return ApiResponse.ok("登录成功", response);
     }
 
     @GetMapping("/oauth/authorize")
@@ -75,14 +79,24 @@ public class AuthController {
             HttpServletRequest httpRequest
     ) {
         requireRateLimit("auth:oauth-url:" + clientIpResolver.resolve(httpRequest), 30, 60_000);
-        return ApiResponse.ok(authService.createOAuthAuthorizationUrl(callbackOrigin, redirect, bind));
+        return ApiResponse.ok(authService.createOAuthAuthorizationUrl(callbackOrigin, redirect, bind, httpRequest.getHeader("X-OAuth-Browser")));
     }
 
     @PostMapping("/oauth/callback")
     public ApiResponse<OAuthLoginResponse> oauthCallback(@Valid @RequestBody OAuthCallbackRequest request,
                                                           HttpServletRequest httpRequest) {
         requireRateLimit("auth:oauth-callback:" + clientIpResolver.resolve(httpRequest), 10, 300_000);
-        return ApiResponse.ok("登录成功", authService.loginWithOAuth(request));
+        var response = authService.loginWithOAuth(request, httpRequest.getHeader("X-OAuth-Browser"), httpRequest.getHeader("Origin"));
+        // Binding preserves the existing token and its original device history.
+        if (response.session() != null) loginSessionService.record(response.session(), httpRequest);
+        return ApiResponse.ok("登录成功", response);
+    }
+
+    @PostMapping("/reauthenticate")
+    public ApiResponse<Void> reauthenticate(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
+        requireRateLimit("auth:reauth:" + clientIpResolver.resolve(httpRequest), 5, 300_000);
+        authService.reauthenticate(request);
+        return ApiResponse.ok("身份已验证", null);
     }
 
     @PostMapping("/logout")

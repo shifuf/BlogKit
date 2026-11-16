@@ -956,7 +956,7 @@ const applyPickedImage = urls => {
 const uploadSettingImage = async (key, { file, onSuccess, onError }) => {
   uploadingImageKey.value = key;
   try {
-    const result = await uploadImageWithCrop(file);
+    const result = await uploadImageWithCrop(file, { publicAccess: true });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;

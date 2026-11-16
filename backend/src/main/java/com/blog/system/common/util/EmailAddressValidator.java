@@ -29,11 +29,11 @@ public final class EmailAddressValidator {
     private static final Pattern EMAIL_FORMAT =
             Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$");
     private static final long DNS_TIMEOUT_MS = 1500L;
-    private static final ExecutorService DNS_EXECUTOR = Executors.newCachedThreadPool(r -> {
+    private static final ExecutorService DNS_EXECUTOR = new java.util.concurrent.ThreadPoolExecutor(2, 4, 30, TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<>(32), r -> {
         Thread t = new Thread(r, "email-dns-check");
         t.setDaemon(true);
         return t;
-    });
+    }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
 
     private EmailAddressValidator() {
     }

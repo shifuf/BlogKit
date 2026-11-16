@@ -14,3 +14,9 @@ pic
 *.log
 frontend-build.log
 miniprogram
+/.runtime
+/backups
+/tests
+/docs
+/.superpowers
+**/__pycache__

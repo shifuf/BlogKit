@@ -110,6 +110,14 @@ public class ExternalNotificationService {
             String template,
             Map<String, Object> variables
     ) {
+        return sendEmailInternal(to,subject,content,html,template,variables,null);
+    }
+
+    public String sendIdempotentEmail(String to,String subject,String content,String idempotencyKey) {
+        return sendEmailInternal(to,subject,content,null,null,null,idempotencyKey);
+    }
+
+    private String sendEmailInternal(String to,String subject,String content,String html,String template,Map<String,Object> variables,String idempotencyKey) {
         PlatformConfig config = resolveConfig(Map.of());
         if (!config.enabled()) {
             return "站点未启用消息通知平台";
@@ -135,15 +143,15 @@ public class ExternalNotificationService {
             if (variables != null && !variables.isEmpty()) {
                 body.put("variables", variables);
             }
-            HttpResponse<String> response = request(config, "/api/email", "POST", objectMapper.writeValueAsString(body));
+            HttpResponse<String> response = request(config, "/api/email", "POST", objectMapper.writeValueAsString(body), idempotencyKey);
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 String detail = extractErrorMessage(response.body());
-                log.warn("邮件通知失败 HTTP {}：{}", response.statusCode(), detail);
+                log.warn("邮件通知失败 HTTP {}", response.statusCode());
                 return detail;
             }
             return null;
         } catch (Exception ex) {
-            log.warn("邮件通知调用失败: {}", ex.getMessage());
+            log.warn("邮件通知调用失败: {}", ex.getClass().getSimpleName());
             return trim(ex.getMessage());
         }
     }
@@ -359,9 +367,13 @@ public class ExternalNotificationService {
     }
 
     private HttpResponse<String> request(PlatformConfig config, String path, String method, String body) throws Exception {
+        return request(config,path,method,body,null);
+    }
+    private HttpResponse<String> request(PlatformConfig config, String path, String method, String body,String idempotencyKey) throws Exception {
         HttpRequest.Builder builder = HttpRequest.newBuilder(outboundUrlValidator.validate(config.baseUrl() + path))
                 .timeout(Duration.ofSeconds(20))
                 .header("Authorization", "Bearer " + config.apiKey());
+        if (StringUtils.hasText(idempotencyKey)) builder.header("Idempotency-Key",idempotencyKey);
         if ("POST".equals(method)) {
             builder.header("Content-Type", "application/json")
                     .POST(HttpRequest.BodyPublishers.ofString(body == null ? "{}" : body));

@@ -1,102 +1,79 @@
 package com.blog.system.service;
 
-import cn.dev33.satoken.stp.StpUtil;
 import com.blog.system.domain.comment.ArticleCommentStatus;
 import com.blog.system.domain.user.UserAccount;
 import com.blog.system.repository.ArticleCommentRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import java.util.regex.Pattern;
 
-/**
- * 正文 {@code :::bd-secret} 隐藏块的服务端门控。
- *
- * <p>未满足 login/comment 条件时清空块内正文，避免仅靠前端遮罩时 Markdown 明文仍随详情接口下发。</p>
- */
+/** Removes unauthorized container bodies before Markdown leaves the server. */
 @Service
 public class SecretBlockFilter {
-    private final ArticleCommentRepository commentRepository;
-    private final CurrentUserService currentUserService;
+    private static final Pattern OPEN = Pattern.compile("^([:]{3,})bd-secret(?:\\s+(\\S+))?.*$");
+    private final ArticleCommentRepository comments;
+    private final CurrentUserService current;
 
-    public SecretBlockFilter(ArticleCommentRepository commentRepository, CurrentUserService currentUserService) {
-        this.commentRepository = commentRepository;
-        this.currentUserService = currentUserService;
+    public SecretBlockFilter(ArticleCommentRepository comments, CurrentUserService current) {
+        this.comments=comments; this.current=current;
     }
 
-    /**
-     * 按当前访问者能力过滤隐藏块。管理员/作者见全文；login 需登录；comment 需已登录且该文有已通过评论。
-     */
-    public String filter(String content, Long articleId, UserAccount currentUser, Long authorId) {
-        if (!StringUtils.hasText(content) || !content.contains("bd-secret")) {
-            return content;
-        }
-        boolean admin = currentUser != null && currentUserService.isAdmin(currentUser);
-        boolean author = currentUser != null && authorId != null && currentUser.getId().equals(authorId);
-        boolean loggedIn = currentUser != null || StpUtil.isLogin();
-        Long userId = currentUser != null ? currentUser.getId()
-                : (StpUtil.isLogin() ? StpUtil.getLoginIdAsLong() : null);
-        boolean hasCommented = userId != null && articleId != null
-                && commentRepository.existsByArticle_IdAndAuthor_IdAndStatus(
-                articleId, userId, ArticleCommentStatus.APPROVED);
-
+    public String filter(String content, Long articleId, UserAccount viewer, Long authorId) {
+        if (!StringUtils.hasText(content) || !content.contains("bd-secret")) return content;
+        boolean privileged = viewer != null && (current.isAdmin(viewer)
+                || (authorId != null && authorId.equals(viewer.getId())));
+        boolean commented = viewer != null && articleId != null && comments
+                .existsByArticle_IdAndAuthor_IdAndStatus(articleId, viewer.getId(), ArticleCommentStatus.APPROVED);
         String[] lines = content.split("\n", -1);
-        StringBuilder out = new StringBuilder(content.length());
-        int i = 0;
-        while (i < lines.length) {
-            String line = lines[i];
-            String trimmed = line.trim();
-            if (trimmed.startsWith(":::")) {
-                String params = trimmed.substring(3).trim();
-                String first = params.isEmpty() ? "" : params.split("\\s+", 2)[0];
-                if ("bd-secret".equals(first)) {
-                    String rest = params.length() > first.length() ? params.substring(first.length()).trim() : "";
-                    String gate = StringUtils.hasText(rest) ? rest.split("\\s+")[0].trim() : "login";
-                    if (!StringUtils.hasText(gate)) {
-                        gate = "login";
-                    }
-                    // 收集到闭合 :::
-                    StringBuilder body = new StringBuilder();
-                    i += 1;
-                    while (i < lines.length && !lines[i].trim().equals(":::")) {
-                        if (body.length() > 0) {
-                            body.append('\n');
-                        }
-                        body.append(lines[i]);
-                        i += 1;
-                    }
-                    boolean allowed = admin || author || canOpen(gate, loggedIn, hasCommented);
-                    out.append(":::bd-secret ").append(gate).append('\n');
-                    if (allowed) {
-                        out.append(body);
-                        if (body.length() > 0) {
-                            out.append('\n');
-                        }
-                    }
-                    // 未授权：块体置空，前台按门控展示遮罩；闭合标记仍保留。
-                    out.append(":::");
-                    if (i < lines.length) {
-                        // 消费闭合行
-                        i += 1;
-                    }
-                    if (i < lines.length) {
-                        out.append('\n');
-                    }
-                    continue;
-                }
+        return filterLines(lines,0,lines.length,privileged,viewer!=null,commented);
+    }
+
+    /** Public previews must never contain gated body text, regardless of the current session. */
+    public static String publicText(String content) {
+        if(content==null)return "";
+        String[] lines=content.split("\n",-1);
+        return filterLines(lines,0,lines.length,false,false,false);
+    }
+
+    public static String safeSummary(String content,String summary) {
+        if(content==null || !content.contains("bd-secret"))return summary==null?"":summary;
+        String text=publicText(content).replaceAll("(?m)^.*:{3,}bd-[^\\n]*$|^\\s*:{3,}\\s*$", " ")
+                .replaceAll("!\\[[^\\]]*\\]\\([^)]*\\)", " ")
+                .replaceAll("<[^>]*>", " ").replaceAll("\\s+", " ").trim();
+        return text.length()>140?text.substring(0,140)+"…":text;
+    }
+
+    private static String filterLines(String[] lines,int start,int end,boolean privileged,boolean loggedIn,boolean commented) {
+        StringBuilder out=new StringBuilder();
+        for(int i=start;i<end;i++) {
+            String normalized=normalize(lines[i]);
+            var opener=OPEN.matcher(normalized);
+            if(!opener.matches()) {out.append(lines[i]);if(i+1<end)out.append('\n');continue;}
+            int length=opener.group(1).length();
+            String gate=opener.group(2)==null?"login":opener.group(2);
+            int close=i+1;
+            // A container closes on a pure fence at least as long as its opener (markdown-it contract).
+            for(;close<end;close++) {
+                String candidate=normalize(lines[close]);
+                if(candidate.matches(":{3,}")&&candidate.length()>=length)break;
             }
-            out.append(line);
-            i += 1;
-            if (i < lines.length) {
-                out.append('\n');
+            boolean allowed=privileged || ("comment".equalsIgnoreCase(gate)?loggedIn&&commented:loggedIn);
+            out.append(lines[i]).append('\n');
+            if(allowed) {
+                String body=filterLines(lines,i+1,close,privileged,loggedIn,commented);
+                out.append(body); if(!body.isEmpty())out.append('\n');
             }
+            if(close<end)out.append(lines[close]);else out.append(":".repeat(length));
+            i=close;
+            if(i+1<end)out.append('\n');
         }
         return out.toString();
     }
 
-    private static boolean canOpen(String gate, boolean loggedIn, boolean hasCommented) {
-        if ("comment".equalsIgnoreCase(gate)) {
-            return loggedIn && hasCommented;
-        }
-        // login 或未知门控：需登录
-        return loggedIn;
+    private static String normalize(String line) {
+        // Containers may be parsed recursively inside blockquotes and list items by markdown-it.
+        String text=line.strip();
+        while(text.startsWith(">"))text=text.substring(1).stripLeading();
+        return text.replaceFirst("^(?:[-+*]|[0-9]+[.)])\\s+", "").strip();
     }
 }

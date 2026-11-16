@@ -68,6 +68,8 @@ public class AuthService {
     private final SystemManagementService systemManagementService;
     private final FileStorageService fileStorageService;
     private final TotpService totpService;
+    private final OAuthStateService oauthStates;
+    private final org.springframework.data.redis.core.StringRedisTemplate securityRedis;
     private final OutboundUrlValidator outboundUrlValidator;
     private final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
@@ -89,6 +91,8 @@ public class AuthService {
             FileStorageService fileStorageService,
             TotpService totpService,
             OutboundUrlValidator outboundUrlValidator,
+            OAuthStateService oauthStates,
+            org.springframework.data.redis.core.StringRedisTemplate securityRedis,
             @Value("${blog.wechat.mini-program.app-id:}") String wechatMiniProgramAppId,
             @Value("${blog.wechat.mini-program.app-secret:}") String wechatMiniProgramAppSecret
     ) {
@@ -102,6 +106,8 @@ public class AuthService {
         this.fileStorageService = fileStorageService;
         this.totpService = totpService;
         this.outboundUrlValidator = outboundUrlValidator;
+        this.oauthStates = oauthStates;
+        this.securityRedis = securityRedis;
         this.wechatMiniProgramAppId = wechatMiniProgramAppId;
         this.wechatMiniProgramAppSecret = wechatMiniProgramAppSecret;
     }
@@ -133,7 +139,7 @@ public class AuthService {
         return loginUser(user);
     }
 
-    @Transactional(readOnly = true)
+    @Transactional
     public LoginResponse adminLogin(LoginRequest request) {
         UserAccount user = authenticatePasswordUser(request);
         if (!"ADMIN".equalsIgnoreCase(user.getRoleCode())) {
@@ -163,13 +169,15 @@ public class AuthService {
         }
     }
 
-    public OAuthAuthorizeResponse createOAuthAuthorizationUrl(String callbackOrigin, String redirect, boolean bind) {
+    public OAuthAuthorizeResponse createOAuthAuthorizationUrl(String callbackOrigin, String redirect, boolean bind, String browser) {
         SystemManagementService.OAuthSettings settings = requireAvailableOAuthSettings();
         String redirectUri = resolveRedirectUri(settings, callbackOrigin);
         String safeRedirect = safeRedirectPath(redirect);
         // 绑定流程：要求当前已登录，把其 userId 编入 state（参与签名，防篡改）；普通登录 bindUserId=null。
         Long bindUserId = bind ? StpUtil.getLoginIdAsLong() : null;
-        String state = newOAuthState(settings, redirectUri, safeRedirect, bindUserId);
+        if (bind) requireRecentAuthentication();
+        String session = StpUtil.isLogin() ? StpUtil.getTokenValue() : null;
+        String state = oauthStates.create(redirectUri, safeRedirect, bindUserId, browser, session);
         Map<String, String> params = new LinkedHashMap<>();
         params.put("client_id", settings.clientId());
         params.put("redirect_uri", redirectUri);
@@ -179,9 +187,15 @@ public class AuthService {
     }
 
     @Transactional
-    public OAuthLoginResponse loginWithOAuth(OAuthCallbackRequest request) {
+    public OAuthLoginResponse loginWithOAuth(OAuthCallbackRequest request, String browser, String origin) {
         SystemManagementService.OAuthSettings settings = requireAvailableOAuthSettings();
-        OAuthState state = consumeOAuthState(request.state(), settings);
+        var state = oauthStates.consume(request.state(), browser, origin, StpUtil.isLogin() ? StpUtil.getTokenValue() : null);
+        if (state.bindUserId() != null) {
+            if (!StpUtil.isLogin() || StpUtil.getLoginIdAsLong() != state.bindUserId().longValue()) {
+                throw new ForbiddenException("绑定账号与当前会话不一致");
+            }
+            requireRecentAuthentication();
+        }
         JsonNode token = exchangeOAuthCode(settings, request.code().trim(), state.redirectUri());
         String accessToken = textValue(token, "access_token");
         if (!StringUtils.hasText(accessToken)) {
@@ -192,7 +206,7 @@ public class AuthService {
         if (state.bindUserId() != null) {
             UserAccount bound = bindOAuthToUser(state.bindUserId(), userInfo);
             // 绑定流程：当前已是管理员会话时允许绑定；不得通过 OAuth 把普通会话升级为管理员。
-            return new OAuthLoginResponse(loginUser(bound), state.redirectPath());
+            return new OAuthLoginResponse(currentUser(), state.redirectPath());
         }
         UserAccount user = upsertOAuthUser(userInfo);
         // 管理员会话必须走后台密码 + TOTP，禁止 OAuth 直接签发 ADMIN token。
@@ -266,7 +280,7 @@ public class AuthService {
     public UserProfileResponse uploadAvatar(MultipartFile file) {
         UserAccount user = userAccountRepository.findById(StpUtil.getLoginIdAsLong())
                 .orElseThrow(() -> new BusinessException("用户不存在"));
-        UploadResponse upload = fileStorageService.storeImage(file, user);
+        UploadResponse upload = fileStorageService.storePublicImage(file, user);
         user.setAvatarUrl(upload.url());
         return toProfileResponse(userAccountRepository.save(user));
     }
@@ -289,6 +303,7 @@ public class AuthService {
     // 注意：以第三方身份创建的账号(synthetic 密码)解绑后将无法用密码登录，交由前台提示后用户自行决定。
     @Transactional
     public UserProfileResponse unbindThirdParty() {
+        requireRecentAuthentication();
         UserAccount user = userAccountRepository.findById(StpUtil.getLoginIdAsLong())
                 .orElseThrow(() -> new BusinessException("用户不存在"));
         if (!StringUtils.hasText(user.getOauthProvider())) {
@@ -323,13 +338,27 @@ public class AuthService {
 
     private LoginResponse loginUser(UserAccount user) {
         try {
-            StpUtil.login(user.getId());
+            StpUtil.login(user.getId(), new cn.dev33.satoken.stp.parameter.SaLoginParameter().setIsShare(false));
+            securityRedis.opsForValue().set("blog:reauth:" + OAuthStateService.hash(StpUtil.getTokenValue()), String.valueOf(user.getId()), Duration.ofMinutes(5));
             SaTokenInfo tokenInfo = StpUtil.getTokenInfo();
             return new LoginResponse(user.getId(), user.getUsername(), user.getDisplayName(), user.getRoleCode(), tokenInfo.getTokenName(), tokenInfo.getTokenValue());
         } catch (Exception ex) {
             log.error("Session login failed, userId={}, username={}, oauthProvider={}", user.getId(), user.getUsername(), user.getOauthProvider(), ex);
             throw ex;
         }
+    }
+
+    @Transactional
+    public void reauthenticate(LoginRequest request) {
+        var user = userAccountRepository.findById(StpUtil.getLoginIdAsLong()).orElseThrow(() -> new BusinessException("用户不存在"));
+        if (!passwordEncoder.matches(request.password(), user.getPasswordHash())) throw new BusinessException("密码错误");
+        totpService.verify(user, request.totpCode());
+        securityRedis.opsForValue().set("blog:reauth:" + OAuthStateService.hash(StpUtil.getTokenValue()), String.valueOf(user.getId()), Duration.ofMinutes(5));
+    }
+
+    private void requireRecentAuthentication() {
+        String value = securityRedis.opsForValue().get("blog:reauth:" + OAuthStateService.hash(StpUtil.getTokenValue()));
+        if (!String.valueOf(StpUtil.getLoginIdAsLong()).equals(value)) throw new BusinessException("请先验证当前密码及二步验证码（有效期五分钟）");
     }
 
     private SystemManagementService.OAuthSettings requireAvailableOAuthSettings() {
@@ -433,7 +462,8 @@ public class AuthService {
                 .orElseGet(() -> createOAuthUser(userInfo, subject));
         user.setDisplayName(trimToMax(resolveOAuthDisplayName(userInfo, subject), 64));
         String email = textValue(userInfo, "email");
-        user.setEmail(StringUtils.hasText(email) && !isSyntheticSocialIdentity(email) ? trimToMax(email, 128) : null);
+        // Provider email is untrusted until this site verifies ownership.
+        if (!user.isEmailVerified()) user.setEmail(StringUtils.hasText(email) && !isSyntheticSocialIdentity(email) ? trimToMax(email, 128) : null);
         String picture = textValue(userInfo, "picture");
         user.setAvatarUrl(StringUtils.hasText(picture) ? trimToMax(picture, 512) : user.getAvatarUrl());
         try {
@@ -557,41 +587,6 @@ public class AuthService {
                 || normalized.matches("^(wechat|qq|github|google|alipay|weibo|baidu|huawei|xiaomi|douyin|bilibili|dingtalk)_[^\\s@]+(@social\\.local)?$");
     }
 
-    private OAuthState consumeOAuthState(String state, SystemManagementService.OAuthSettings settings) {
-        if (!StringUtils.hasText(state)) {
-            throw new BusinessException("OAuth 登录校验失败，请重新发起登录");
-        }
-
-        // 载荷 6 段：redirectUri . redirectPath . epoch . bindUserId . nonce . signature
-        String[] parts = state.split("\\.", -1);
-        if (parts.length != 6) {
-            throw new BusinessException("OAuth 登录校验失败，请重新发起登录");
-        }
-
-        String payload = parts[0] + "." + parts[1] + "." + parts[2] + "." + parts[3] + "." + parts[4];
-        String expectedSignature = signOAuthState(settings.clientSecret(), payload);
-        if (!MessageDigest.isEqual(expectedSignature.getBytes(StandardCharsets.UTF_8), parts[5].getBytes(StandardCharsets.UTF_8))) {
-            throw new BusinessException("OAuth 登录校验失败，请重新发起登录");
-        }
-
-        try {
-            String redirectUri = base64UrlDecode(parts[0]);
-            String redirectPath = safeRedirectPath(base64UrlDecode(parts[1]));
-            Instant createdAt = Instant.ofEpochSecond(Long.parseLong(parts[2]));
-            long bindUserIdRaw = Long.parseLong(parts[3]);
-            Long bindUserId = bindUserIdRaw > 0 ? bindUserIdRaw : null;
-            Instant now = Instant.now();
-            if (createdAt.plus(OAUTH_STATE_TTL).isBefore(now) || createdAt.minusSeconds(60).isAfter(now)) {
-                throw new BusinessException("OAuth 登录已过期，请重新发起登录");
-            }
-            return new OAuthState(redirectUri, redirectPath, createdAt, bindUserId);
-        } catch (BusinessException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new BusinessException("OAuth 登录校验失败，请重新发起登录");
-        }
-    }
-
     private String resolveRedirectUri(SystemManagementService.OAuthSettings settings, String callbackOrigin) {
         if (StringUtils.hasText(settings.redirectUri())) {
             return settings.redirectUri().trim();
@@ -612,23 +607,6 @@ public class AuthService {
         } catch (Exception ex) {
             throw new BusinessException("OAuth 回调地址无效");
         }
-    }
-
-    private String newOAuthState(SystemManagementService.OAuthSettings settings, String redirectUri, String redirectPath) {
-        return newOAuthState(settings, redirectUri, redirectPath, null);
-    }
-
-    // bindUserId 非空表示这是「已登录用户绑定第三方」流程：回调时把第三方身份挂到该用户，而非 find-or-create 登录。
-    // 该 id 编入 state 载荷并参与签名，防止被篡改成绑定到他人账号。
-    private String newOAuthState(SystemManagementService.OAuthSettings settings, String redirectUri, String redirectPath, Long bindUserId) {
-        byte[] randomBytes = new byte[16];
-        secureRandom.nextBytes(randomBytes);
-        String payload = base64UrlEncode(redirectUri)
-                + "." + base64UrlEncode(redirectPath)
-                + "." + Instant.now().getEpochSecond()
-                + "." + (bindUserId == null ? "0" : String.valueOf(bindUserId))
-                + "." + HexFormat.of().formatHex(randomBytes);
-        return payload + "." + signOAuthState(settings.clientSecret(), payload);
     }
 
     private String safeRedirectPath(String redirect) {

@@ -22,11 +22,17 @@ FROM ${JRE_RUNTIME_IMAGE}
 WORKDIR /app
 
 ENV TZ=Asia/Shanghai \
-    SERVER_PORT=8080
+    SERVER_PORT=8080 \
+    JAVA_TOOL_OPTIONS="-Xms64m -Xmx256m -XX:MaxMetaspaceSize=128m -XX:ReservedCodeCacheSize=48m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
 
-COPY --from=build /workspace/backend/target/blog-backend-0.0.1-SNAPSHOT.jar /app/app.jar
+RUN addgroup -S -g 10001 blog && adduser -S -D -u 10001 -G blog blog \
+    && mkdir -p /app/uploads /app/backups && chown -R blog:blog /app
+
+COPY --chown=blog:blog --from=build /workspace/backend/target/blog-backend-0.0.1-SNAPSHOT.jar /app/app.jar
+USER 10001:10001
 
 EXPOSE 8080
 
 # 限制运行期 JVM 堆：默认 JVM 会按物理内存 1/4 起步并可能涨到很大，小内存机上会和 postgres/frontend 抢内存。
-ENTRYPOINT ["java", "-XX:MaxRAMPercentage=45", "-XX:+UseSerialGC", "-jar", "/app/app.jar"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=4 CMD wget -q -O /dev/null http://127.0.0.1:8080/actuator/health || exit 1
+ENTRYPOINT ["java", "-jar", "/app/app.jar"]

@@ -88,6 +88,7 @@ export const toBlogArticle = (item: ArticleSummary | ArticleDetail, index = 0): 
     excerpt: item.summary || '',
     content,
     rawContent,
+    seriesId: detail.seriesId, seriesSlug: detail.seriesSlug, seriesName: detail.seriesName, seriesOrder: detail.seriesOrder,
     category: item.categorySlug || slugify(item.categoryName),
     categoryName: item.categoryName || '',
     tags: item.tagNames || [],
@@ -144,11 +145,13 @@ export const toBlogComment = (comment: CommentSummary): CommentItem => {
     verified: isAdmin,
     // IP 归属地（省/市），后端字段名为 region，前台以 location 标签展示。
     location: comment.region || undefined,
+    status: comment.status,
+    replyToCommentId: comment.replyToCommentId,
+    replyTo: comment.replyTo || undefined,
+    replyToContent: comment.replyToContent,
+    replyToUnavailable: comment.replyToUnavailable,
     replyCount: comment.replyCount,
-    replies: (comment.replies || []).map(reply => ({
-      ...toBlogComment(reply),
-      replyTo: comment.authorName
-    }))
+    replies: (comment.replies || []).map(toBlogComment)
   };
 };
 export const toFriendLink = (link: FriendLinkSummary): LinkItem => ({

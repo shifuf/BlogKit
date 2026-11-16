@@ -12,7 +12,7 @@ export function resolveSiteUrl(event: H3Event): string {
   }
   const headers = event.node.req.headers;
   const pick = (value: string | string[] | undefined) =>
-    (Array.isArray(value) ? value[0] : value || '').split(',')[0].trim();
+    ((Array.isArray(value) ? value[0] : value) || '').split(',')[0]?.trim() || '';
   const proto = pick(headers['x-forwarded-proto']) || 'http';
   const host = pick(headers['x-forwarded-host']) || pick(headers['host']);
   return host ? `${proto}://${host}` : '';

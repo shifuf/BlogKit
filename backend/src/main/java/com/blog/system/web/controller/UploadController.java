@@ -30,10 +30,10 @@ public class UploadController {
     }
 
     @PostMapping
-    public ApiResponse<UploadResponse> uploadImage(@RequestParam("file") MultipartFile file) {
+    public ApiResponse<UploadResponse> uploadImage(@RequestParam("file") MultipartFile file, @RequestParam(defaultValue="false") boolean publicAccess) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
-        UploadResponse response = fileStorageService.storeImage(file, currentUser);
+        UploadResponse response = publicAccess ? fileStorageService.storePublicImage(file, currentUser) : fileStorageService.storeImage(file, currentUser);
         operationLogService.record("附件管理", "上传图片", "UploadedAsset", null, response.fileName());
         return ApiResponse.ok("上传成功", response);
     }

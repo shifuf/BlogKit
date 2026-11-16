@@ -65,6 +65,12 @@ public class CommentController {
         return ApiResponse.ok(commentService.findArticleComments(articleId, page, size));
     }
 
+    @GetMapping("/api/v1/comments/{id}/replies")
+    public ApiResponse<PageResponse<CommentResponse>> listReplies(@PathVariable Long id,
+            @RequestParam(defaultValue = "0") int page, @RequestParam(defaultValue = "10") int size) {
+        return ApiResponse.ok(commentService.findCommentReplies(id, page, size));
+    }
+
     @PostMapping("/api/v1/comments")
     public ApiResponse<CommentResponse> createComment(@Valid @RequestBody CommentCreateRequest request, HttpServletRequest httpRequest) {
         // 防刷：同一身份（登录 id 或访客 IP）60 秒内最多 5 条评论。内容风控见 CommentService#resolveInitialStatus。
@@ -121,17 +127,18 @@ public class CommentController {
     }
 
     @PostMapping("/api/v1/comments/{id}/report")
-    public ApiResponse<CommentResponse> reportComment(@PathVariable Long id, HttpServletRequest httpRequest) {
+    public ApiResponse<Void> reportComment(@PathVariable Long id, HttpServletRequest httpRequest) {
         if (!rateLimiter.tryAcquire("comment-report:" + rateLimitKey(httpRequest) + ":" + id, 3, 60_000)) {
             throw new BusinessException("举报太频繁，请稍后再试");
         }
-        return ApiResponse.ok("已收到举报", commentService.reportComment(id));
+        commentService.reportComment(id);
+        return ApiResponse.ok("已收到举报", null);
     }
 
     @PostMapping("/api/v1/comments/upload-image")
     public ApiResponse<UploadResponse> uploadCommentImage(@RequestParam("file") MultipartFile file) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
-        UploadResponse response = fileStorageService.storeImage(file, currentUser);
+        UploadResponse response = fileStorageService.storePublicImage(file, currentUser);
         return ApiResponse.ok("上传成功", response);
     }
 }

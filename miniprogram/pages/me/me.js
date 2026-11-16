@@ -17,20 +17,15 @@ Page({
     profileBio: ''
   },
 
-  onShow() {
+  async onShow() {
     this.refreshSession();
-    this.loadSiteSettings();
-    if (this.data.isLoggedIn) {
-      this.loadDashboard();
-    }
+    await this.loadSiteSettings();
+    if (this.data.isLoggedIn) await this.loadDashboard();
   },
 
   onPullDownRefresh() {
-    const tasks = [this.loadSiteSettings()];
-    if (this.data.isLoggedIn) {
-      tasks.push(this.loadDashboard());
-    }
-    Promise.all(tasks).finally(() => wx.stopPullDownRefresh());
+    this.loadSiteSettings().then(() => this.data.isLoggedIn ? this.loadDashboard() : undefined)
+      .finally(() => wx.stopPullDownRefresh());
   },
 
   refreshSession() {

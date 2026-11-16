@@ -21,6 +21,20 @@ import org.springframework.web.servlet.resource.NoResourceFoundException;
 public class GlobalExceptionHandler {
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
 
+    @ExceptionHandler({EditConflictException.class, org.springframework.dao.OptimisticLockingFailureException.class})
+    @ResponseStatus(HttpStatus.CONFLICT)
+    public ApiResponse<Void> handleConflict(Exception exception) {
+        return ApiResponse.error("文章已被其他窗口修改，请比较最新版本后重新保存");
+    }
+
+    @ExceptionHandler({cn.dev33.satoken.exception.NotRoleException.class, cn.dev33.satoken.exception.NotPermissionException.class})
+    @ResponseStatus(HttpStatus.FORBIDDEN)
+    public ApiResponse<Void> handleRole(Exception exception) { return ApiResponse.error("没有操作权限"); }
+
+    @ExceptionHandler(NotFoundException.class)
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public ApiResponse<Void> handleMissing(NotFoundException exception) { return ApiResponse.error(exception.getMessage()); }
+
     @ExceptionHandler(BusinessException.class)
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiResponse<Void> handleBusinessException(BusinessException exception) {
@@ -60,13 +74,9 @@ public class GlobalExceptionHandler {
     })
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public ApiResponse<Void> handleDataException(Exception exception) {
-        log.error("Data exception", exception);
-        // 不统一误导成「账号」问题：评论/配置写入失败也常走这个分支。
-        String detail = exception.getMessage();
-        if (detail != null && detail.length() > 180) {
-            detail = detail.substring(0, 180) + "...";
-        }
-        return ApiResponse.error("数据写入失败，请重试或联系管理员查看后端日志" + (detail == null ? "" : "：" + detail));
+        String trace = java.util.UUID.randomUUID().toString();
+        log.error("Data exception trace=" + trace, exception);
+        return ApiResponse.error("数据写入失败，请重试；追踪编号：" + trace);
     }
 
     @ExceptionHandler({
@@ -87,7 +97,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(Exception.class)
     @ResponseStatus(HttpStatus.INTERNAL_SERVER_ERROR)
     public ApiResponse<Void> handleException(Exception exception) {
-        log.error("Unhandled server exception", exception);
-        return ApiResponse.error("服务器内部错误");
+        String trace = java.util.UUID.randomUUID().toString();
+        log.error("Unhandled server exception trace=" + trace, exception);
+        return ApiResponse.error("服务器内部错误；追踪编号：" + trace);
     }
 }

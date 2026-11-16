@@ -13,6 +13,36 @@
 const UFM_PUBLIC_PATH_RE = /\/api\/public\/files\/[^/?#]+/i;
 const TRANSFORM_KEYS = new Set(['x', 'y', 'w', 'h', 'cw', 'ch', 'format']);
 
+/** Temporary UFM credentials belong to previews and must never be saved in article URLs. */
+export function stripUfmAccessParams(sourceUrl) {
+  if (!isUfmPublicFileUrl(sourceUrl)) return sourceUrl || '';
+  try {
+    const parsed = new URL(sourceUrl, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    parsed.searchParams.delete('expires');
+    parsed.searchParams.delete('signature');
+    return sourceUrl.startsWith('/') ? `${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.toString();
+  } catch {
+    return sourceUrl;
+  }
+}
+
+/** Resolve a stable image/crop URL for display without changing markdown. */
+export function resolveImagePreview(sourceUrl, previews = {}) {
+  if (!sourceUrl) return '';
+  const stable = stripUfmAccessParams(sourceUrl);
+  const base = stripUfmTransformParams(stable);
+  const preview = previews[stable] || previews[base];
+  if (!preview) return stable;
+  try {
+    const parsed = new URL(preview, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    const crop = new URL(stable, typeof window !== 'undefined' ? window.location.origin : 'http://localhost');
+    for (const key of TRANSFORM_KEYS) if (crop.searchParams.has(key)) parsed.searchParams.set(key, crop.searchParams.get(key));
+    return preview.startsWith('/') ? `${parsed.pathname}${parsed.search}${parsed.hash}` : parsed.toString();
+  } catch {
+    return preview;
+  }
+}
+
 /**
  * 是否为 UFM 公开文件直链（可拼 crop 参数、服务端裁切）。
  */

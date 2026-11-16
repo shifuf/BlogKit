@@ -38,7 +38,7 @@ public class DynamicComment {
     private String replyTo;
 
     /** 仅根评论维护：其下回复数。 */
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
     private long replyCount = 0;
 
     @Column(nullable = false, length = 40)

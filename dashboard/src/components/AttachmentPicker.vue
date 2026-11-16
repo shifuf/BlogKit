@@ -26,6 +26,7 @@
         <span class="muted">已选 {{ selected.length }} {{ imagesOnly ? '张' : '项' }}</span>
       </a-space>
     </div>
+    <p class="muted">选中素材保留原有公开 / 私有权限；插入文章和裁剪不会自动改变素材权限。</p>
     <a-spin :spinning="loading">
       <div v-if="items.length" class="picker-grid">
         <button
@@ -36,11 +37,12 @@
           :class="{ selected: selectedIds.has(item.id) }"
           @click="toggle(item)"
         >
-          <img v-if="isImage(item)" :src="assetUrl(item.url)" :alt="item.fileName" loading="eager" decoding="async" />
+          <img v-if="isImage(item)" :src="assetUrl(item.previewUrl || item.url)" :alt="item.fileName" loading="eager" decoding="async" />
           <div v-else class="picker-card__file">
             <span class="picker-card__ext">{{ fileExt(item) }}</span>
           </div>
           <span class="picker-card__name" :title="item.fileName">{{ item.fileName }}</span>
+          <span class="muted">{{ item.isPublic === true ? '公开素材' : '私有素材' }}</span>
         </button>
       </div>
       <a-empty v-else :description="imagesOnly ? '暂无图片附件' : '暂无附件'" />
@@ -64,6 +66,7 @@ import { computed, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import { getAttachmentList } from '@/api/Attachment';
 import { cropLibraryImageUrl } from '@/utils/imageCrop';
+import { stripUfmAccessParams } from '@/utils/imageCropUrl';
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -74,7 +77,7 @@ const props = defineProps({
   cropPreset: { type: String, default: 'free' },
   cropTitle: { type: String, default: '裁剪图片' }
 });
-const emit = defineEmits(['update:open', 'pick']);
+const emit = defineEmits(['update:open', 'pick', 'previews']);
 
 const loading = ref(false);
 const confirming = ref(false);
@@ -167,23 +170,29 @@ const handleConfirm = async () => {
   try {
     if (props.imagesOnly && props.allowCrop && cropAfterPick.value) {
       const finalUrls = [];
+      const previews = Object.fromEntries(selected.value.filter(item => item.url && item.previewUrl).map(item => [stripUfmAccessParams(item.url), item.previewUrl]));
       for (let i = 0; i < selected.value.length; i += 1) {
         const item = selected.value[i];
         // UFM 直链：只拼 ?x&y&w&h 裁切参数，不重传；其它图床仍走裁剪上传
         // eslint-disable-next-line no-await-in-loop
-        const url = await cropLibraryImageUrl(assetUrl(item.url), {
+        const url = await cropLibraryImageUrl(assetUrl(item.previewUrl || item.url), {
           fileName: item.fileName,
+          stableUrl: item.url,
+          publicAccess: item.isPublic === true,
+          onUploaded: asset => { if (asset?.url && asset.previewUrl) previews[stripUfmAccessParams(asset.url)] = asset.previewUrl; },
           defaultPreset: props.cropPreset,
           title: props.cropTitle
         });
         if (!url) return;
         finalUrls.push(url);
       }
+      emit('previews', previews);
       emit('pick', finalUrls);
       emit('update:open', false);
       return;
     }
-    emit('pick', selected.value.map(item => item.url).filter(Boolean));
+    emit('previews', Object.fromEntries(selected.value.filter(item => item.url && item.previewUrl).map(item => [item.url, item.previewUrl])));
+    emit('pick', selected.value.map(item => stripUfmAccessParams(item.url)).filter(Boolean));
     emit('update:open', false);
   } catch (error) {
     message.error(error?.message || '处理选中附件失败');

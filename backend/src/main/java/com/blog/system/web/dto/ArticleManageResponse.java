@@ -45,6 +45,7 @@ public record ArticleManageResponse(
         ArticleVisibility visibility,
         List<Long> allowedUserIds,
         boolean hasPassword,
-        boolean listedInPublic
+        boolean listedInPublic,
+        Long version
 ) {
 }

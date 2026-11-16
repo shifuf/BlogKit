@@ -29,16 +29,7 @@ public class SearchAnalyticsService {
         if (!StringUtils.hasText(safeKeyword)) {
             return;
         }
-        SearchKeywordStat stat = searchKeywordStatRepository.findByKeyword(safeKeyword)
-                .orElseGet(SearchKeywordStat::new);
-        stat.setKeyword(safeKeyword);
-        stat.setTotalCount(stat.getTotalCount() + 1);
-        stat.setLastResultCount(Math.max(resultCount, 0));
-        if (resultCount <= 0) {
-            stat.setNoResultCount(stat.getNoResultCount() + 1);
-        }
-        stat.setLastSearchedAt(OffsetDateTime.now());
-        searchKeywordStatRepository.save(stat);
+        searchKeywordStatRepository.increment(safeKeyword, Math.max(resultCount, 0));
     }
 
     @Transactional(readOnly = true)

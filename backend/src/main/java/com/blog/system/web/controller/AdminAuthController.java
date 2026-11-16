@@ -141,7 +141,8 @@ public class AdminAuthController {
         }
     }
 
-    @PostMapping("/totp/setup") public ApiResponse<TotpSetupResponse> setupTotp(){return ApiResponse.ok(totpService.setup());}
+    @PostMapping("/totp/setup") public ApiResponse<TotpSetupResponse> setupTotp(@RequestBody(required=false) Map<String,String> body){return ApiResponse.ok(totpService.setup(body == null ? null : body.get("code")));}
+    @PostMapping("/totp/recovery-codes") public ApiResponse<java.util.List<String>> recoveryCodes(@RequestBody Map<String,String> body){return ApiResponse.ok(totpService.regenerateRecoveryCodes(body.get("code")));}
     @GetMapping("/totp/status") public ApiResponse<Map<String,Boolean>> totpStatus(){return ApiResponse.ok(Map.of("enabled",totpService.enabled()));}
     @PostMapping("/totp/confirm") public ApiResponse<Void> confirmTotp(@RequestBody Map<String,String> body){totpService.confirm(body.get("code"));return ApiResponse.ok("二步验证已启用",null);}
     @PostMapping("/totp/disable") public ApiResponse<Void> disableTotp(@RequestBody Map<String,String> body){totpService.disable(body.get("code"));return ApiResponse.ok("二步验证已关闭",null);}

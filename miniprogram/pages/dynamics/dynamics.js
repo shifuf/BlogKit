@@ -73,43 +73,24 @@ Page({
     }
   },
 
-  async loadDynamics() {
-    if (this.data.loading) {
-      return;
-    }
+  async loadDynamics(append = false) {
+    if (this.data.loading) return;
     this.setData({ loading: true });
     try {
-      const list = await blog.fetchDynamics();
-      const all = (list || []).map(normalizeDynamic);
-      const shown = Math.min(PAGE_SIZE, all.length);
-      this.setData({
-        all,
-        dynamics: all.slice(0, shown),
-        shown,
-        finished: shown >= all.length,
-        empty: !all.length
-      });
-      this.hydrateLikes(this.data.dynamics);
+      const page = append ? (this.nextPage || 0) : 0;
+      const result = await blog.fetchDynamics(page, PAGE_SIZE, this.guestKey);
+      const incoming = (result.items || []).map(normalizeDynamic);
+      const items = append ? this.data.dynamics.concat(incoming) : incoming;
+      this.nextPage = page + 1;
+      this.setData({ dynamics: items, all: items, shown: items.length,
+        finished: items.length >= result.totalItems, empty: !items.length });
     } catch (error) {
-      this.setData({ all: [], dynamics: [], empty: true, finished: true });
       wx.showToast({ title: (error && error.message) || '加载失败', icon: 'none' });
-    } finally {
-      this.setData({ loading: false });
-    }
+    } finally { this.setData({ loading: false }); }
   },
 
   showMore() {
-    if (this.data.finished || this.data.loading) {
-      return;
-    }
-    const shown = Math.min(this.data.shown + PAGE_SIZE, this.data.all.length);
-    const nextItems = this.data.all.slice(this.data.dynamics.length, shown);
-    this.setData({
-      dynamics: this.data.dynamics.concat(nextItems),
-      shown,
-      finished: shown >= this.data.all.length
-    });
-    this.hydrateLikes(nextItems);
+    if (!this.data.finished) return this.loadDynamics(true);
   },
 
   // 串行补点赞状态，避免并发打爆连接导致 timeout
@@ -222,6 +203,21 @@ Page({
 
   onGuestNameInput(event) {
     this.setData({ guestName: event.detail.value });
+  },
+
+  async loadMoreReplies(event) {
+    const rootId = Number(event.currentTarget.dataset.root);
+    const root = this.data.comments.find(c => c.id === rootId);
+    if (!root || root.repliesLoading) return;
+    this.setData({ comments: this.data.comments.map(c => c.id === rootId ? { ...c, repliesLoading: true } : c) });
+    try {
+      const page = root.replyPage || 0;
+      const result = await blog.fetchDynamicReplies(this.data.activeId, rootId, page, 10);
+      this.setData({ comments: this.data.comments.map(c => c.id === rootId ? { ...c,
+        replies: page ? (c.replies || []).concat(result.items) : result.items,
+        replyPage: page + 1, replyCount: result.totalItems } : c) });
+    } catch (error) { wx.showToast({ title: error.message || '回复加载失败', icon: 'none' }); }
+    finally { this.setData({ comments: this.data.comments.map(c => c.id === rootId ? { ...c, repliesLoading: false } : c) }); }
   },
 
   tapReply(event) {

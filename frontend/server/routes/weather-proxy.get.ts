@@ -34,7 +34,7 @@ const resolveVisitorIp = (event: Parameters<typeof getQuery>[0]): string => {
     const chain = xff.split(',').map(p => p.trim()).filter(Boolean);
     // 从右往左找到第一个非内网 IP，即真实访客（跳过反代自注入的内网条目）。
     for (let i = chain.length - 1; i >= 0; i--) {
-      const candidate = normalizeIp(chain[i]);
+      const candidate = normalizeIp(chain[i] || '');
       if (candidate && !isPrivateOrLocal(candidate)) {
         return candidate;
       }
@@ -56,7 +56,7 @@ const normalizeIp = (ip: string): string => {
   let value = ip.replace(/^::ffff:/i, '');
   // 形如 1.2.3.4:5678 的带端口写法（IPv6 带端口通常包在 [] 里，这里只处理 IPv4）。
   if (/^\d+\.\d+\.\d+\.\d+:\d+$/.test(value)) {
-    value = value.split(':')[0];
+    value = value.split(':')[0] || '';
   }
   return value;
 };

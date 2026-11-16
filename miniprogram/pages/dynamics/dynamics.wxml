@@ -108,6 +108,7 @@
             <text class="cmt__reply" data-root="{{item.id}}" data-author="{{item.authorName}}" bindtap="tapReply">回复</text>
           </view>
 
+          <button wx:if="{{item.replies.length < item.replyCount}}" data-root="{{item.id}}" loading="{{item.repliesLoading}}" bindtap="loadMoreReplies">加载更多回复</button>
           <view wx:if="{{item.replies.length}}" class="cmt__replies">
             <view wx:for="{{item.replies}}" wx:for-item="reply" wx:key="id" class="cmt-reply">
               <view class="cmt-reply__line">

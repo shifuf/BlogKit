@@ -17,15 +17,22 @@ public class EmailSubscription {
     private String token;
 
     @Column(nullable = false)
-    private boolean confirmed = true;
+    private boolean confirmed = false;
 
     @Column(nullable = false)
-    private boolean enabled = true;
+    private boolean enabled = false;
 
     @Column(nullable = false)
     private OffsetDateTime createdAt = OffsetDateTime.now();
 
     private OffsetDateTime unsubscribedAt;
+    @Column(length=64) private String confirmationTokenHash;
+    private OffsetDateTime confirmationExpiresAt;
+    public String getConfirmationTokenHash(){return confirmationTokenHash;}
+    public void setConfirmationTokenHash(String v){confirmationTokenHash=v;}
+    public OffsetDateTime getConfirmationExpiresAt(){return confirmationExpiresAt;}
+    public void setConfirmationExpiresAt(OffsetDateTime v){confirmationExpiresAt=v;}
+
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }

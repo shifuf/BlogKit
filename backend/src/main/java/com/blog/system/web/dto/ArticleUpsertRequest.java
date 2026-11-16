@@ -34,6 +34,7 @@ public record ArticleUpsertRequest(
         ArticleVisibility visibility,
         @Size(max = 100) String accessPassword,
         List<Long> allowedUserIds,
-        Boolean listedInPublic
+        Boolean listedInPublic,
+        Long version
 ) {
 }

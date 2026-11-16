@@ -38,10 +38,10 @@ public class DynamicPost {
     @Column(nullable = false, columnDefinition = "integer default 0")
     private Integer displayOrder = 0;
 
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
     private long likeCount = 0;
 
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
     private long commentCount = 0;
 
     private OffsetDateTime publishedAt;

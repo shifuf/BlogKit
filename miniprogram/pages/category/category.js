@@ -39,6 +39,8 @@ Page({
   },
 
   async refresh() {
+    this.requestGeneration = (this.requestGeneration || 0) + 1;
+    this.setData({ loading: false });
     this.setData({ page: 0, articles: [], finished: false });
     await this.loadMore();
   },
@@ -46,11 +48,13 @@ Page({
   async loadMore() {
     if (this.data.loading || this.data.finished) return;
     this.setData({ loading: true });
+    const generation = this.requestGeneration || 0;
     try {
       const page = this.data.page;
       const filters = { sort: 'latest' };
       if (this.data.slug) filters.categorySlug = this.data.slug;
       const result = await blog.fetchArticles(page, this.data.size, filters);
+      if (generation !== (this.requestGeneration || 0)) return;
       const items = (result?.items || result?.content || []).map(normalizeArticle);
       const totalPages = Number(result?.totalPages || 0);
       this.setData({
@@ -60,9 +64,10 @@ Page({
         finished: page + 1 >= totalPages || !items.length
       });
     } catch (error) {
+      if (generation !== (this.requestGeneration || 0)) return;
       wx.showToast({ title: (error && error.message) || '加载失败', icon: 'none' });
     } finally {
-      this.setData({ loading: false });
+      if (generation === (this.requestGeneration || 0)) this.setData({ loading: false });
     }
   },
 

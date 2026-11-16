@@ -7,6 +7,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Collection;
@@ -103,6 +104,16 @@ public interface ArticleCommentRepository extends JpaRepository<ArticleComment, 
             @Param("keyword") String keyword,
             Pageable pageable
     );
+
+    @EntityGraph(attributePaths = {"author", "article", "parent", "parent.author"})
+    @Query(value = "select c from ArticleComment c where c.parent.id = :parentId and (c.status is null or c.status = :status) order by c.createdAt asc, c.id asc",
+           countQuery = "select count(c) from ArticleComment c where c.parent.id = :parentId and (c.status is null or c.status = :status)")
+    Page<ArticleComment> findApprovedReplies(@Param("parentId") Long parentId,
+            @Param("status") ArticleCommentStatus status, Pageable pageable);
+
+    @Modifying(flushAutomatically = true)
+    @Query("update ArticleComment c set c.replyCount = case when c.replyCount + :delta < 0 then 0 else c.replyCount + :delta end where c.id = :id")
+    int adjustReplyCount(@Param("id") Long id, @Param("delta") long delta);
 
     long countByAuthor_Id(Long authorId);
 

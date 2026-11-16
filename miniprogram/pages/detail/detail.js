@@ -6,6 +6,9 @@ Page({
     id: null,
     article: null,
     comments: [],
+    commentsPage: 0,
+    commentsTotal: 0,
+    loadingComments: false,
     related: [],
     engagement: {
       liked: false,
@@ -17,6 +20,7 @@ Page({
     commentContent: '',
     // 回复态：activeReplyId 为正在回复的顶级评论 id（null 表示未展开任何回复框）。
     activeReplyId: null,
+    replyTargetId: null,
     replyContent: '',
     replyTargetAuthor: '',
     submittingReply: false,
@@ -29,18 +33,28 @@ Page({
   },
 
   onLoad(options) {
+    this._unloaded = false;
+    this._contextGeneration = (this._contextGeneration || 0) + 1;
     const id = Number(options.id);
     // hasCommented 为「评论可见」隐藏块/下载的游客软门控标记（与前台 localStorage 同思路）。
-    this.setData({ id, hasCommented: Boolean(wx.getStorageSync(`bd-commented-${id}`)) });
+    this.setData({ id, article: null, comments: [], hasCommented: Boolean(wx.getStorageSync(`bd-commented-${id}`)) });
     this.refreshSession();
     this.loadAll();
   },
 
-  onShow() {
-    this.refreshSession();
+  async onShow() {
+    const changed = this.refreshSession();
+    if (changed && this.data.id) {
+      await Promise.all([this.loadArticle(), this.data.commentsEnabled ? this.loadComments() : Promise.resolve()]);
+    }
     if (this.data.id && this.data.isLoggedIn) {
       this.loadEngagement();
     }
+  },
+
+  onUnload() {
+    this._unloaded = true;
+    this._contextGeneration = (this._contextGeneration || 0) + 1;
   },
 
   onPullDownRefresh() {
@@ -49,7 +63,40 @@ Page({
 
   refreshSession() {
     const app = getApp();
+    const session = app.getSession() || {};
+    const key = `${session.tokenName || 'Authorization'}:${session.tokenValue || ''}`;
+    const changed = this._sessionKey !== undefined && this._sessionKey !== key;
+    this._sessionKey = key;
+    if (changed) {
+      this._contextGeneration = (this._contextGeneration || 0) + 1;
+      this.setData({ article: null, comments: [], commentsPage: 0, commentsTotal: 0, loadingComments: false,
+        loading: false, unlocking: false, unlockPassword: '', activeReplyId: null, replyTargetId: null,
+        likingArticle: false, favoritingArticle: false, submittingComment: false, submittingReply: false,
+        engagement: { liked: false, favorited: false } });
+    }
     this.setData({ isLoggedIn: app.isLoggedIn() });
+    return changed;
+  },
+
+  requestContext() {
+    const session = getApp().getSession() || {};
+    return { id: this.data.id, generation: this._contextGeneration || 0,
+      token: session.tokenValue || '', tokenName: session.tokenName || 'Authorization' };
+  },
+
+  contextIsCurrent(context) {
+    const current = this.requestContext();
+    return !this._unloaded && context.id === current.id && context.generation === current.generation
+      && context.token === current.token && context.tokenName === current.tokenName;
+  },
+
+  beginDetailRequest() {
+    this._detailGeneration = (this._detailGeneration || 0) + 1;
+    return { ...this.requestContext(), detailGeneration: this._detailGeneration };
+  },
+
+  detailRequestIsCurrent(context) {
+    return context.detailGeneration === this._detailGeneration && this.contextIsCurrent(context);
   },
 
   async loadAll() {
@@ -58,8 +105,10 @@ Page({
     }
 
     this.setData({ loading: true });
+    const context = this.requestContext();
     try {
       await this.loadSiteSettings();
+      if (!this.contextIsCurrent(context)) return;
       const tasks = [
         this.loadArticle(),
         this.loadRelated()
@@ -70,66 +119,89 @@ Page({
         this.setData({ comments: [] });
       }
       await Promise.all(tasks);
-      if (this.data.isLoggedIn) {
+      if (this.contextIsCurrent(context) && this.data.isLoggedIn) {
         await this.loadEngagement();
       }
     } finally {
-      this.setData({ loading: false });
+      if (this.contextIsCurrent(context)) this.setData({ loading: false });
     }
   },
 
   async loadArticle() {
+    const context = this.beginDetailRequest();
     try {
-      const article = await blog.fetchArticleDetail(this.data.id);
+      const article = await blog.fetchArticleDetail(context.id);
+      if (!this.detailRequestIsCurrent(context)) return;
       const normalized = normalizeArticleDetail(article);
       this.setData({ article: normalized });
       wx.setNavigationBarTitle({ title: normalized.title || '文章详情' });
     } catch (error) {
+      if (!this.detailRequestIsCurrent(context)) return;
       this.setData({ article: null });
       this.showError(error);
     }
   },
 
-  async loadComments() {
+  async loadComments(append = false) {
+    if (this.data.loadingComments) return;
+    this.setData({ loadingComments: true });
+    const context = this.requestContext();
     if (!this.data.commentsEnabled) {
-      this.setData({ comments: [] });
+      this.setData({ comments: [], loadingComments: false });
       return;
     }
     try {
-      const response = await blog.fetchComments(this.data.id, 0, 20);
+      const page = append ? this.data.commentsPage : 0;
+      const response = await blog.fetchComments(context.id, page, 20);
+      if (!this.contextIsCurrent(context)) return;
+      const items = (response.items || []).map(normalizeComment);
       this.setData({
-        comments: (response.items || []).map(normalizeComment)
+        comments: append ? this.data.comments.concat(items) : items,
+        commentsPage: page + 1, commentsTotal: response.totalItems
       });
     } catch (error) {
-      this.setData({ comments: [] });
-    }
+      if (!this.contextIsCurrent(context)) return;
+      if (!append) this.setData({ comments: [] });
+      this.showError(error);
+    } finally { if (this.contextIsCurrent(context)) this.setData({ loadingComments: false }); }
   },
 
+  loadMoreComments() { return this.loadComments(true); },
+
   async loadRelated() {
+    const context = this.requestContext();
     try {
-      const related = await blog.fetchRelatedArticles(this.data.id, 4);
+      const related = await blog.fetchRelatedArticles(context.id, 4);
+      if (!this.contextIsCurrent(context)) return;
       this.setData({
         related: (related || []).map(normalizeArticle)
       });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.setData({ related: [] });
     }
   },
 
   async loadSiteSettings() {
+    const context = this.requestContext();
     try {
       const settings = await blog.fetchSiteSettings();
+      if (!this.contextIsCurrent(context)) return;
       this.setData({ commentsEnabled: Boolean(settings && settings.commentsEnabled === true) });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.setData({ commentsEnabled: false });
     }
   },
 
   async loadEngagement() {
+    const context = this.requestContext();
     try {
-      const engagement = await blog.fetchFavoriteStatus(this.data.id);
+      const engagement = await blog.fetchFavoriteStatus(context.id);
+      if (!this.contextIsCurrent(context)) return;
       this.setData({ engagement });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.setData({ engagement: { liked: false, favorited: false } });
     }
   },
@@ -191,14 +263,19 @@ Page({
       return;
     }
     this.setData({ unlocking: true });
+    this._unlockAttempt = (this._unlockAttempt || 0) + 1;
+    const attempt = this._unlockAttempt;
+    const context = this.beginDetailRequest();
     try {
-      const article = await blog.unlockArticle(this.data.id, password);
+      const article = await blog.unlockArticle(context.id, password);
+      if (!this.detailRequestIsCurrent(context)) return;
       this.setData({ article: normalizeArticleDetail(article), unlockPassword: '' });
       wx.showToast({ title: '已解锁', icon: 'success' });
     } catch (error) {
+      if (!this.detailRequestIsCurrent(context)) return;
       wx.showToast({ title: (error && error.message) || '访问密码错误', icon: 'none' });
     } finally {
-      this.setData({ unlocking: false });
+      if (attempt === this._unlockAttempt && this.contextIsCurrent(context)) this.setData({ unlocking: false });
     }
   },
 
@@ -207,17 +284,20 @@ Page({
       return;
     }
     this.setData({ likingArticle: true });
+    const context = this.requestContext();
     try {
-      const engagement = await blog.likeArticle(this.data.id);
+      const engagement = await blog.likeArticle(context.id);
+      if (!this.contextIsCurrent(context)) return;
       this.setData({
         engagement,
         'article.likeCount': engagement.likeCount,
         'article.favoriteCount': engagement.favoriteCount
       });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.showError(error);
     } finally {
-      this.setData({ likingArticle: false });
+      if (this.contextIsCurrent(context)) this.setData({ likingArticle: false });
     }
   },
 
@@ -226,17 +306,20 @@ Page({
       return;
     }
     this.setData({ favoritingArticle: true });
+    const context = this.requestContext();
     try {
-      const engagement = await blog.toggleFavorite(this.data.id);
+      const engagement = await blog.toggleFavorite(context.id);
+      if (!this.contextIsCurrent(context)) return;
       this.setData({
         engagement,
         'article.likeCount': engagement.likeCount,
         'article.favoriteCount': engagement.favoriteCount
       });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.showError(error);
     } finally {
-      this.setData({ favoritingArticle: false });
+      if (this.contextIsCurrent(context)) this.setData({ favoritingArticle: false });
     }
   },
 
@@ -256,22 +339,28 @@ Page({
     }
 
     this.setData({ submittingComment: true });
+    const context = this.requestContext();
     try {
-      const comment = await blog.createComment(this.data.id, content);
+      const comment = await blog.createComment(context.id, content);
+      if (!this.contextIsCurrent(context)) return;
+      const approved = comment.status === 'APPROVED';
       const comments = [normalizeComment(comment)].concat(this.data.comments);
       // 标记已评论：解锁本文「评论后可见」的隐藏块/下载（与前台 localStorage 同思路）。
-      wx.setStorageSync(`bd-commented-${this.data.id}`, 1);
+      if (approved) wx.setStorageSync(`bd-commented-${this.data.id}`, 1);
       this.setData({
         commentContent: '',
         comments,
-        hasCommented: true,
-        'article.commentCount': this.data.article.commentCount + 1
+        hasCommented: approved || this.data.hasCommented,
+        commentsTotal: this.data.commentsTotal + (approved ? 1 : 0),
+        'article.commentCount': this.data.article.commentCount + (approved ? 1 : 0)
       });
-      wx.showToast({ title: '评论已发布', icon: 'success' });
+      wx.showToast({ title: approved ? '评论已发布' : '评论已提交，等待审核', icon: 'success' });
+      if (approved) await this.loadArticle();
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.showError(error);
     } finally {
-      this.setData({ submittingComment: false });
+      if (this.contextIsCurrent(context)) this.setData({ submittingComment: false });
     }
   },
 
@@ -283,11 +372,14 @@ Page({
       return;
     }
     const commentId = Number(event.currentTarget.dataset.id);
+    const context = this.requestContext();
     try {
       const patch = normalizeComment(await blog.toggleCommentLike(commentId));
+      if (!this.contextIsCurrent(context)) return;
       const comments = this.data.comments.map((comment) => (comment.id === patch.id ? patch : comment));
       this.setData({ comments });
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.showError(error);
     }
   },
@@ -300,16 +392,17 @@ Page({
     }
     const rootId = Number(event.currentTarget.dataset.root);
     const author = event.currentTarget.dataset.author || '';
+    const targetId = Number(event.currentTarget.dataset.target || rootId);
     // 再次点同一条已展开的回复框则收起。
-    if (this.data.activeReplyId === rootId && this.data.replyTargetAuthor === author) {
+    if (this.data.activeReplyId === rootId && this.data.replyTargetId === targetId) {
       this.closeReply();
       return;
     }
-    this.setData({ activeReplyId: rootId, replyTargetAuthor: author, replyContent: '' });
+    this.setData({ activeReplyId: rootId, replyTargetId: targetId, replyTargetAuthor: author, replyContent: '' });
   },
 
   closeReply() {
-    this.setData({ activeReplyId: null, replyTargetAuthor: '', replyContent: '' });
+    this.setData({ activeReplyId: null, replyTargetId: null, replyTargetAuthor: '', replyContent: '' });
   },
 
   onReplyInput(event) {
@@ -331,29 +424,57 @@ Page({
     }
 
     this.setData({ submittingReply: true });
+    const context = this.requestContext();
     try {
-      const reply = normalizeComment(await blog.createComment(this.data.id, content, rootId));
+      const reply = normalizeComment(await blog.createComment(context.id, content, this.data.replyTargetId || rootId));
+      if (!this.contextIsCurrent(context)) return;
+      const approved = reply.status === 'APPROVED';
       const comments = this.data.comments.map((comment) => {
         if (comment.id !== rootId) {
           return comment;
         }
         const replies = (comment.replies || []).concat(reply);
-        return { ...comment, replies, replyCount: (comment.replyCount || 0) + 1 };
+        return { ...comment, replies, replyCount: (comment.replyCount || 0) + (approved ? 1 : 0) };
       });
-      wx.setStorageSync(`bd-commented-${this.data.id}`, 1);
+      if (approved) wx.setStorageSync(`bd-commented-${this.data.id}`, 1);
       this.setData({
         comments,
-        hasCommented: true,
+        hasCommented: approved || this.data.hasCommented,
         activeReplyId: null,
+        replyTargetId: null,
         replyTargetAuthor: '',
         replyContent: '',
-        'article.commentCount': this.data.article.commentCount + 1
+        'article.commentCount': this.data.article.commentCount + (approved ? 1 : 0)
       });
-      wx.showToast({ title: '回复已发布', icon: 'success' });
+      wx.showToast({ title: approved ? '回复已发布' : '回复已提交，等待审核', icon: 'success' });
+      if (approved) await this.loadArticle();
     } catch (error) {
+      if (!this.contextIsCurrent(context)) return;
       this.showError(error);
     } finally {
-      this.setData({ submittingReply: false });
+      if (this.contextIsCurrent(context)) this.setData({ submittingReply: false });
+    }
+  },
+
+  async loadMoreReplies(event) {
+    const rootId = Number(event.currentTarget.dataset.root);
+    const root = this.data.comments.find(c => c.id === rootId);
+    if (!root || root.repliesLoading) return;
+    const page = root.replyPage || 0;
+    const context = this.requestContext();
+    this.setData({ comments: this.data.comments.map(c => c.id === rootId ? { ...c, repliesLoading: true } : c) });
+    try {
+      const result = await blog.fetchCommentReplies(rootId, page, 10);
+      if (!this.contextIsCurrent(context)) return;
+      const incoming = result.items.map(normalizeComment);
+      const existing = page === 0 ? [] : root.replies;
+      this.setData({ comments: this.data.comments.map(c => c.id === rootId ? {
+        ...c, replies: existing.concat(incoming.filter(r => !existing.some(e => e.id === r.id))),
+        replyCount: result.totalItems, replyPage: page + 1
+      } : c) });
+    } catch (error) { if (this.contextIsCurrent(context)) this.showError(error); }
+    finally {
+      if (this.contextIsCurrent(context)) this.setData({ comments: this.data.comments.map(c => c.id === rootId ? { ...c, repliesLoading: false } : c) });
     }
   },
 

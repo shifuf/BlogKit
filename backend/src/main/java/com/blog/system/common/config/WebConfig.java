@@ -69,6 +69,10 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/admin/auth/login",
                         "/api/v1/auth/login",
                         "/api/v1/auth/register",
+                        "/api/v1/auth/recovery/forgot-password",
+                        "/api/v1/auth/recovery/reset-password",
+                        "/api/v1/auth/recovery/verify-email",
+                        "/api/v1/comments/*/replies",
                         "/api/v1/auth/wechat-mini-program/login",
                         "/api/v1/auth/oauth/authorize",
                         "/api/v1/auth/oauth/callback",
@@ -88,6 +92,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/comments",
                         "/api/v1/comments/*/report",
                         "/api/v1/downloads/open",
+                        "/api/v1/article-media/open",
                         "/api/v1/categories/**",
                         "/api/v1/tags/**",
                         "/api/v1/series/**",
@@ -100,6 +105,8 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/comments/unsubscribe-email",
                         "/uploads/**"
                 );
+        registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkRole("ADMIN")))
+                .addPathPatterns("/actuator/**").excludePathPatterns("/actuator/health", "/actuator/health/**");
         // 后台管理：必须 ADMIN 角色（业务方法里也有 requireAdmin 双保险）
         registry.addInterceptor(new SaInterceptor(handle -> StpUtil.checkRole("ADMIN")))
                 .addPathPatterns("/api/v1/admin/**")

@@ -8,13 +8,8 @@ const props = defineProps<{
   hasCommented: boolean;
   onLockedAction: (gate: string) => void;
 }>();
-const locked = computed(() => {
-  // 服务端已清空未授权块体：有正文则视为已通过门控（含管理员/作者/已评论）。
-  // 仍兼容旧客户端：无正文时按 gate 本地判断。
-  if (props.html && props.html.trim()) return false;
-  if (props.gate === 'comment') return !props.hasCommented;
-  return !props.isAuthenticated;
-});
+// A server-redacted block remains locked until refreshed content actually arrives.
+const locked = computed(() => !props.html || !props.html.trim());
 const hint = computed(() => props.gate === 'comment' ? '评论后可见此处内容' : '登录后可见此处内容');
 const showEmptyUnlocked = computed(() => !locked.value && !(props.html && props.html.trim()));
 </script>

@@ -1,38 +1,57 @@
 services:
   postgres:
     image: ${POSTGRES_IMAGE:-docker.m.daocloud.io/library/postgres:17-alpine}
-    container_name: blog-postgres
+    container_name: ${POSTGRES_CONTAINER_NAME:-blog-postgres}
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-blog_system}
-      POSTGRES_USER: ${DB_USERNAME:-blog}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      POSTGRES_USER: ${DB_ADMIN_USERNAME:-blog_admin}
+      POSTGRES_PASSWORD: ${DB_ADMIN_PASSWORD:?set DB_ADMIN_PASSWORD in .env}
+      DB_USERNAME: ${DB_USERNAME:-blog_app}
+      DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      DB_MIGRATION_USERNAME: ${DB_MIGRATION_USERNAME:-blog_migrator}
+      DB_MIGRATION_PASSWORD: ${DB_MIGRATION_PASSWORD:?set DB_MIGRATION_PASSWORD in .env}
+      BLOG_BACKUP_DB_USERNAME: ${BLOG_BACKUP_DB_USERNAME:-blog_backup}
+      BLOG_BACKUP_DB_PASSWORD: ${BLOG_BACKUP_DB_PASSWORD:?set BLOG_BACKUP_DB_PASSWORD in .env}
       TZ: Asia/Shanghai
     volumes:
       - postgres-data:/var/lib/postgresql/data
-    # 部分主机 seccomp/apparmor 会拦截 postgres 写 pid/xact；放宽后仍使用 Docker volume
-    security_opt:
-      - seccomp:unconfined
-      - apparmor:unconfined
+      - ./scripts/ops:/opt/blog-ops:ro
+      - ./scripts/ops/init-db-roles.sh:/docker-entrypoint-initdb.d/10-blog-roles.sh:ro
+    command: ["postgres", "-c", "shared_buffers=64MB", "-c", "work_mem=2MB", "-c", "maintenance_work_mem=32MB", "-c", "max_connections=35"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 20
-    mem_limit: 512m
+    mem_limit: ${POSTGRES_MEMORY_LIMIT:-256m}
+    cpus: ${POSTGRES_CPUS:-0.5}
+    logging: &bounded-logs
+      driver: json-file
+      options: {max-size: "10m", max-file: "3"}
     networks:
       - blog-network
 
   redis:
     image: ${REDIS_IMAGE:-docker.m.daocloud.io/library/redis:7-alpine}
-    container_name: blog-redis
+    container_name: ${REDIS_CONTAINER_NAME:-blog-redis}
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-    command: ["redis-server", "--appendonly", "yes"]
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set independent REDIS_PASSWORD in .env}
+    entrypoint: ["/bin/sh", "/opt/blog-ops/start-redis.sh"]
     volumes:
       - redis-data:/data
-    mem_limit: 128m
+      - ./scripts/ops/start-redis.sh:/opt/blog-ops/start-redis.sh:ro
+    tmpfs: [/tmp:size=1m,mode=1777]
+    mem_limit: ${REDIS_MEMORY_LIMIT:-96m}
+    cpus: "0.25"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 30s
+      timeout: 3s
+      retries: 4
+    logging: *bounded-logs
     networks:
       - blog-network
 
@@ -43,13 +62,13 @@ services:
       args:
         JDK_BUILD_IMAGE: ${JDK_BUILD_IMAGE:-docker.m.daocloud.io/library/eclipse-temurin:17-jdk-alpine}
         JRE_RUNTIME_IMAGE: ${JRE_RUNTIME_IMAGE:-docker.m.daocloud.io/library/eclipse-temurin:17-jre-alpine}
-    container_name: blog-backend
+    container_name: ${BACKEND_CONTAINER_NAME:-blog-backend}
     restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     environment:
       # 运行环境：.env 中 BLOG_ENV（dev/prod），Compose 默认 prod
       BLOG_ENV: ${BLOG_ENV:-prod}
@@ -57,16 +76,40 @@ services:
       SERVER_PORT: 8080
       # Docker 内固定走服务名，无需在 .env 写 DB_URL / REDIS_HOST
       DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-blog_system}
-      DB_USERNAME: ${DB_USERNAME:-blog}
+      DB_USERNAME: ${DB_USERNAME:-blog_app}
       DB_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in .env}
+      DB_POOL_MAX: ${DB_POOL_MAX:-4}
+      DB_POOL_MIN: 1
+      SPRING_FLYWAY_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-blog_system}
+      SPRING_FLYWAY_USER: ${DB_MIGRATION_USERNAME:-blog_migrator}
+      SPRING_FLYWAY_PASSWORD: ${DB_MIGRATION_PASSWORD:?set DB_MIGRATION_PASSWORD in .env}
+      SPRING_FLYWAY_BASELINE_ON_MIGRATE: "false"
+      BLOG_BACKUP_DB_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-blog_system}
+      BLOG_BACKUP_DB_USERNAME: ${BLOG_BACKUP_DB_USERNAME:-blog_backup}
+      BLOG_BACKUP_DB_PASSWORD: ${BLOG_BACKUP_DB_PASSWORD:?set BLOG_BACKUP_DB_PASSWORD in .env}
       REDIS_HOST: redis
       REDIS_PORT: 6379
-      REDIS_PASSWORD: ""
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?set independent REDIS_PASSWORD in .env}
       REDIS_DATABASE: 0
       BLOG_ADMIN_USERNAME: ${BLOG_ADMIN_USERNAME:-admin}
       BLOG_ADMIN_PASSWORD: ${BLOG_ADMIN_PASSWORD:?set BLOG_ADMIN_PASSWORD in .env}
       BLOG_ADMIN_DISPLAY_NAME: ${BLOG_ADMIN_DISPLAY_NAME:-站点管理员}
       UPLOAD_ROOT_DIR: /app/uploads
+      BLOG_BACKUP_DIR: /app/backups
+      BLOG_BACKUP_RETENTION_COUNT: ${BLOG_BACKUP_RETENTION_COUNT:-7}
+      BLOG_BACKUP_REPLICA_DIR: ${BLOG_BACKUP_REPLICA_DIR:-}
+      BLOG_TRUSTED_PROXY_CIDRS: ${BLOG_TRUSTED_PROXY_CIDRS:-127.0.0.1/32,::1/128}
+      BLOG_TRUSTED_PROXY_COUNT: ${BLOG_TRUSTED_PROXY_COUNT:-1}
+      BLOG_OUTBOUND_PRIVATE_HOST_ALLOWLIST: ${BLOG_OUTBOUND_PRIVATE_HOST_ALLOWLIST:-localhost,127.0.0.1,::1}
+      BLOG_CORS_ALLOWED_ORIGINS: ${BLOG_CORS_ALLOWED_ORIGINS:-}
+      BLOG_NOTIFY_BASE_URL: ${BLOG_NOTIFY_BASE_URL:-http://localhost:3000}
+      BLOG_NOTIFY_API_KEY: ${BLOG_NOTIFY_API_KEY:-}
+      BLOG_NOTIFY_TIMEOUT_SECONDS: ${BLOG_NOTIFY_TIMEOUT_SECONDS:-10}
+      BLOG_NOTIFICATION_PAYLOAD_KEY: ${BLOG_NOTIFICATION_PAYLOAD_KEY:-${BLOG_BACKUP_ENCRYPTION_KEY}}
+      FILE_MANAGER_BASE_URL: ${FILE_MANAGER_BASE_URL:-}
+      FILE_MANAGER_API_PREFIX: ${FILE_MANAGER_API_PREFIX:-/api}
+      FILE_MANAGER_APP_ID: ${FILE_MANAGER_APP_ID:-}
+      FILE_MANAGER_APP_SECRET: ${FILE_MANAGER_APP_SECRET:-}
       BLOG_DOWNLOAD_SECRET_KEY: ${BLOG_DOWNLOAD_SECRET_KEY:?set BLOG_DOWNLOAD_SECRET_KEY in .env}
       BLOG_TOTP_SECRET_KEY: ${BLOG_TOTP_SECRET_KEY:-}
       BLOG_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
@@ -79,10 +122,18 @@ services:
       BLOG_MUSIC_API_KEY: ${BLOG_MUSIC_API_KEY:-}
       WECHAT_MINI_PROGRAM_APP_ID: ${WECHAT_MINI_PROGRAM_APP_ID:-}
       WECHAT_MINI_PROGRAM_APP_SECRET: ${WECHAT_MINI_PROGRAM_APP_SECRET:-}
-      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info,metrics,prometheus,caches
+      MANAGEMENT_ENDPOINTS_WEB_EXPOSURE_INCLUDE: health,info
       TZ: Asia/Shanghai
     volumes:
       - uploads-data:/app/uploads
+      - backups-data:/app/backups
+    mem_limit: ${BACKEND_MEMORY_LIMIT:-512m}
+    cpus: ${BACKEND_CPUS:-0.75}
+    read_only: true
+    tmpfs: [/tmp:size=32m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *bounded-logs
     networks:
       - blog-network
 
@@ -96,10 +147,11 @@ services:
         NUXT_PUBLIC_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
         VITE_API_PAYLOAD_SECRET: ${BLOG_API_PAYLOAD_SECRET:?set BLOG_API_PAYLOAD_SECRET in .env}
         BLOG_ADMIN_BASE_PATH: ${BLOG_ADMIN_BASE_PATH:-/admin}
-    container_name: blog-frontend
+    container_name: ${FRONTEND_CONTAINER_NAME:-blog-frontend}
     restart: unless-stopped
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
     environment:
       BLOG_ENV: ${BLOG_ENV:-prod}
       NODE_ENV: production
@@ -114,7 +166,14 @@ services:
       NUXT_SENIVERSE_WIDGET_TOKEN: ${SENIVERSE_WIDGET_TOKEN:-}
       TZ: Asia/Shanghai
     ports:
-      - "${FRONTEND_PORT:-3256}:3256"
+      - "${FRONTEND_BIND_IP:-127.0.0.1}:${FRONTEND_PORT:-3256}:3256"
+    mem_limit: ${FRONTEND_MEMORY_LIMIT:-256m}
+    cpus: ${FRONTEND_CPUS:-0.5}
+    read_only: true
+    tmpfs: [/tmp:size=16m,mode=1777]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    logging: *bounded-logs
     networks:
       - blog-network
 
@@ -124,5 +183,10 @@ networks:
 
 volumes:
   postgres-data:
+    name: ${POSTGRES_VOLUME_NAME:?set existing POSTGRES_VOLUME_NAME before deployment}
   redis-data:
+    name: ${REDIS_VOLUME_NAME:?set existing REDIS_VOLUME_NAME before deployment}
   uploads-data:
+    name: ${UPLOADS_VOLUME_NAME:?set existing UPLOADS_VOLUME_NAME before deployment}
+  backups-data:
+    name: ${BACKUPS_VOLUME_NAME:-blog-backups-data}

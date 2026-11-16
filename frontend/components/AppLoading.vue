@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // 全屏加载页：SSR 直出，随 HTML 立即显示；待应用水合且所有 await 数据(useAsyncData/站点设置)解析完成后淡出释放。
 // 用 useState 保证 SSR 与客户端初始一致(默认显示)，避免水合闪烁。
-const appLoading = useState('app-loading', () => true);
+const appLoading = useState('app-loading', () => false);
 const nuxtApp = useNuxtApp();
 
 const release = () => {
@@ -39,13 +39,16 @@ if (import.meta.client) {
 <style>
 .app-loading {
   position: fixed;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
   z-index: 99999;
   display: flex;
   align-items: center;
   justify-content: center;
   background: #ffffff;
-  pointer-events: auto;
+  pointer-events: none;
 }
 .app-loading-fade-leave-active,
 .app-loading-fade-leave-to {

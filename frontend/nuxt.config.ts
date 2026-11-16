@@ -77,25 +77,7 @@ const adminCspDirectives = [
 ].join('; ');
 const adminCspHeader = { [cspHeaderName]: adminCspDirectives };
 export default defineNuxtConfig({
-  app: {
-    head: {
-      // 播放器由 plugins/music-player.client.ts 注册自定义元素，不再注入旧 public 脚本。
-      // maximum-scale=1：禁止 iOS 聚焦 input 时自动放大页面，避免弹窗按钮点不到。
-      viewport: 'width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover'
-    }
-  },
   // 路由切换始终回到顶部；刷新时也由 scroll-top 插件兜底。
-  router: {
-    options: {
-      scrollBehavior(to, _from, savedPosition) {
-        // 仅浏览器前进/后退保留位置；普通跳转、进入文章/动态一律回顶。
-        if (savedPosition && (to as { meta?: { keepScroll?: boolean } }).meta?.keepScroll) {
-          return savedPosition;
-        }
-        return { left: 0, top: 0 };
-      }
-    }
-  },
   compatibilityDate: '2026-05-26',
   devtools: {
     enabled: true
@@ -111,7 +93,7 @@ export default defineNuxtConfig({
     }
   },
   modules: ['@element-plus/nuxt', '@nuxtjs/tailwindcss', '@pinia/nuxt', 'pinia-plugin-persistedstate/nuxt', '@vite-pwa/nuxt'],
-  css: ['~/assets/styles/main.scss', '~/assets/font/iconfont.css'],
+  css: ['md-editor-v3/lib/preview.css', '~/assets/styles/main.scss', '~/assets/font/iconfont.css'],
   runtimeConfig: {
     backendOrigin,
     public: {
@@ -185,7 +167,11 @@ export default defineNuxtConfig({
     // swr:60 会让编辑后旧 HTML 滞留到缓存过期(且叠加 SW 页面缓存表现为更久)，出现"过几分钟才更新、标题不同步"。
     // 详情接口本身每次请求都自增浏览量(无后端缓存)，实时 SSR 直接读库即可，速度足够。
     // 分类/标签页有路径参数、站内排序和客户端切换，不能用 SWR 复用旧 HTML/payload。
-    '/dynamics': { swr: 30 },
+    '/dynamics': { headers: { 'cache-control': 'private, no-store' } },
+    '/article/**': { headers: { 'cache-control': 'private, no-store' } },
+    '/profile': { headers: { 'cache-control': 'private, no-store' } },
+    '/notifications': { headers: { 'cache-control': 'private, no-store' } },
+    '/preview/**': { headers: { 'cache-control': 'private, no-store' } },
     // 后台(/admin)放开浏览器定位权限：高德「获取当前定位」需要 geolocation。
     // 比下面 /** 更具体，优先生效。
     [`${adminBasePath}/**`]: {
@@ -247,10 +233,7 @@ export default defineNuxtConfig({
     }
   },
   elementPlus: {
-    importStyle: 'scss',
-    config: {
-      zIndex: 12000
-    }
+    importStyle: 'scss'
   },
   pwa: {
     registerType: 'autoUpdate',
@@ -278,62 +261,24 @@ export default defineNuxtConfig({
         purpose: 'maskable'
       }]
     },
-    workbox: {
+    generateSW: {
       // 不预缓存 HTML 应用壳：在线访问始终走网络拿最新 HTML，避免更新后旧壳引用失效 chunk 导致页面不可交互。
       globPatterns: ['**/*.{js,css,svg,png,ico,woff2}'],
       // 不预缓存：① layout-interaction 遗留资源；② admin 后台整包(首访前台用不到，~3.4MB)；
       // 这样首次访问只预缓存前台首屏必需资源，不与关键请求抢带宽。
       globIgnores: ['**/layout-interaction/**', '**' + adminBasePath + '/**'],
-      maximumFileSizeToCacheInBytes: 3145728,
       cleanupOutdatedCaches: true,
+      navigateFallback: null,
       clientsClaim: true,
       skipWaiting: true,
-      navigateFallbackDenylist: [/^\/api/, new RegExp('^' + adminBasePath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), /^\/uploads/, /^\/oauth/],
       runtimeCaching: [{
-        urlPattern: ({
-          url
-        }) => ['/api', adminBasePath, '/uploads'].some(p => url.pathname.startsWith(p)),
-        handler: 'NetworkOnly'
-      }, {
-        // 分类/标签页依赖路径参数和站内筛选，始终走网络，避免旧 Service Worker 复用上一个页面 HTML。
-        urlPattern: ({
-          url,
-          request,
-          sameOrigin
-        }) => sameOrigin && ['/category', '/tags'].some(path => url.pathname.startsWith(path)) && request.mode === 'navigate',
-        handler: 'NetworkOnly'
-      }, {
-        urlPattern: ({
-          request,
-          sameOrigin
-        }) => sameOrigin && request.destination === 'image',
-        handler: 'CacheFirst',
-        options: {
-          cacheName: 'images',
-          expiration: {
-            maxEntries: 200,
-            maxAgeSeconds: 2592000
-          }
-        }
-      }, {
-        urlPattern: ({
-          request,
-          sameOrigin
-        }) => sameOrigin && request.mode === 'navigate',
-        handler: 'NetworkFirst',
-        options: {
-          cacheName: 'pages',
-          networkTimeoutSeconds: 3
-        }
-      }, {
-        urlPattern: ({
-          request,
-          sameOrigin
-        }) => sameOrigin && ['style', 'script', 'font'].includes(request.destination),
+        // Only fingerprinted build assets are safe to share across accounts.
+        urlPattern: /\/_nuxt\/.*\.(?:js|css|woff2)(?:\?.*)?$/,
         handler: 'StaleWhileRevalidate',
-        options: {
-          cacheName: 'assets'
-        }
+        options: { cacheName: 'public-build-assets-v2' }
+      }, {
+        urlPattern: ({ sameOrigin }) => sameOrigin,
+        handler: 'NetworkOnly'
       }]
     },
     client: {
@@ -386,6 +331,6 @@ export default defineNuxtConfig({
   },
   features: {
     // 内联关键 CSS 写入 <head>，避免首屏样式额外往返
-    inlineStyles: true
+    inlineStyles: false
   }
 });

@@ -21,7 +21,7 @@ public interface ArticleFavoriteRepository extends JpaRepository<ArticleFavorite
 
     List<ArticleFavorite> findAllByUser_IdOrderByCreatedAtDesc(Long userId);
 
-    @EntityGraph(attributePaths = {"article", "article.category", "article.tags", "article.author"})
+    @EntityGraph(attributePaths = {"article", "article.category", "article.author"})
     Page<ArticleFavorite> findByUser_IdAndArticle_StatusAndArticle_DeletedAtIsNullOrderByCreatedAtDesc(Long userId, ArticleStatus status, Pageable pageable);
 
     void deleteAllByArticle_Id(Long articleId);

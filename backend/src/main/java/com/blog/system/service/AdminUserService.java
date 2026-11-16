@@ -98,7 +98,10 @@ public class AdminUserService {
     public void resetPassword(Long id, String password) {
         requireAdmin();
         UserAccount user = userAccountRepository.findById(id).orElseThrow(() -> new BusinessException("用户不存在"));
-        user.setPasswordHash(passwordEncoder.encode(StringUtils.hasText(password) ? password : "123456"));
+        if (password == null || password.length() < 12 || password.length() > 128) {
+            throw new BusinessException("请明确提供 12 至 128 位的新密码");
+        }
+        user.setPasswordHash(passwordEncoder.encode(password));
         userAccountRepository.save(user);
         // 重置后使该用户全部会话失效。
         cn.dev33.satoken.stp.StpUtil.logout(id);

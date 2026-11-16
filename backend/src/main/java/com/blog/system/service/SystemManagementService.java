@@ -64,6 +64,7 @@ public class SystemManagementService {
     private final CurrentUserService currentUserService;
     private final ObjectMapper objectMapper;
     private final HttpClient httpClient;
+    @org.springframework.beans.factory.annotation.Autowired private com.blog.system.common.util.PublicHttpFetcher publicFetcher;
     private final OutboundUrlValidator outboundUrlValidator;
     private final ExternalNotificationService externalNotificationService;
     private final String publicSiteUrl;
@@ -228,7 +229,6 @@ public class SystemManagementService {
      * 检测到回链本站 → APPROVED + 可见；否则 PENDING + 隐藏，等管理员审核。
      * 申请默认展示在友链页；邮箱必填，可选审核结果邮件通知。
      */
-    @Transactional
     @CacheEvict(value = "publicFriendLinks", allEntries = true)
     public FriendLink applyFriendLink(
             String name,
@@ -300,8 +300,9 @@ public class SystemManagementService {
             return false;
         }
         try {
-            URI home = outboundUrlValidator.validate(applicantUrl);
-            String homeHtml = fetchText(home, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8");
+            URI home = outboundUrlValidator.validatePublic(applicantUrl);
+            long deadline = System.nanoTime() + java.util.concurrent.TimeUnit.SECONDS.toNanos(10);
+            String homeHtml = fetchText(home, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8", deadline);
             if (containsBacklink(homeHtml, ourHost)) {
                 return true;
             }
@@ -310,7 +311,7 @@ public class SystemManagementService {
                 for (String path : SPA_FRIEND_LINK_PATHS) {
                     URI page = resolveRelative(home, path);
                     if (page == null) continue;
-                    String html = fetchText(page, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8");
+                    String html = fetchText(page, "text/html,application/xhtml+xml;q=0.9,*/*;q=0.8", deadline);
                     if (containsBacklink(html, ourHost)) {
                         return true;
                     }
@@ -318,7 +319,7 @@ public class SystemManagementService {
                 // 从首页 HTML 抽出 script src，在较小的 bundle 里搜域名（部分站点将友链固化在前端配置中）
                 for (String scriptUrl : extractScriptUrls(homeHtml, home)) {
                     if (scriptUrl.length() > 500) continue;
-                    String js = fetchText(URI.create(scriptUrl), "application/javascript,text/javascript,*/*;q=0.8");
+                    String js = fetchText(URI.create(scriptUrl), "application/javascript,text/javascript,*/*;q=0.8", deadline);
                     if (containsBacklink(js, ourHost)) {
                         return true;
                     }
@@ -332,33 +333,14 @@ public class SystemManagementService {
     }
 
     private static final String[] SPA_FRIEND_LINK_PATHS = {
-            "/friends", "/friend", "/friend-links", "/friendlinks", "/links", "/link",
-            "/blogroll", "/about", "/about-me", "/site", "/sites"
+            "/friends", "/friend-links", "/links"
     };
 
-    private String fetchText(URI target, String accept) {
-        try {
-            HttpRequest request = HttpRequest.newBuilder(target)
-                    .timeout(Duration.ofSeconds(8))
-                    .header("User-Agent", "Mozilla/5.0 (compatible; BlogFriendLinkBot/1.1)")
-                    .header("Accept", accept)
-                    .GET()
-                    .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-            if (response.statusCode() < 200 || response.statusCode() >= 400) {
-                return "";
-            }
-            String body = response.body();
-            if (!StringUtils.hasText(body)) {
-                return "";
-            }
-            if (body.length() > BACKLINK_BODY_LIMIT) {
-                return body.substring(0, BACKLINK_BODY_LIMIT);
-            }
-            return body;
-        } catch (Exception ex) {
-            return "";
-        }
+    private String fetchText(URI target, String accept, long deadline) {
+        long remaining = java.util.concurrent.TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
+        if (remaining <= 0) return "";
+        try { return publicFetcher.fetch(target.toString(), accept, BACKLINK_BODY_LIMIT, Math.min(remaining, 3000)).body(); }
+        catch (Exception failure) { return ""; }
     }
 
     /** 首页几乎只有 #app / #root + 脚本，视为 SPA 壳。 */

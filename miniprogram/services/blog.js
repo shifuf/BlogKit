@@ -55,6 +55,10 @@ function fetchComments(articleId, page = 0, size = 20) {
   });
 }
 
+function fetchCommentReplies(commentId, page = 0, size = 10) {
+  return request(`/comments/${commentId}/replies`, { data: { page, size }, auth: true });
+}
+
 function login(payload) {
   return request('/auth/login', {
     method: 'POST',
@@ -156,8 +160,12 @@ function openDownload(token) {
 
 // ===== 动态（dynamics）=====
 // 动态全部公开，无需登录；点赞/评论用 guestKey 归属。列表不分页，一次返回全部可见动态。
-function fetchDynamics() {
-  return request('/dynamics');
+function fetchDynamics(page = 0, size = 10, guestKey) {
+  return request('/dynamics', { data: { page, size, guestKey } });
+}
+
+function fetchDynamicReplies(id, rootId, page = 0, size = 10) {
+  return request(`/dynamics/${id}/comments/${rootId}/replies`, { data: { page, size } });
 }
 
 function fetchDynamicLikeStatus(id, guestKey) {
@@ -197,6 +205,7 @@ module.exports = {
   fetchCategories,
   fetchTags,
   fetchComments,
+  fetchCommentReplies,
   login,
   loginWithWechatMiniProgram,
   register,
@@ -212,6 +221,7 @@ module.exports = {
   deleteComment,
   openDownload,
   fetchDynamics,
+  fetchDynamicReplies,
   fetchDynamicLikeStatus,
   toggleDynamicLike,
   fetchDynamicComments,

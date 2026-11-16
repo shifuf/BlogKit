@@ -17,4 +17,6 @@ public interface AccessBlacklistRepository extends JpaRepository<AccessBlacklist
             String targetType, String targetValue, Pageable pageable);
 
     List<AccessBlacklist> findByEnabledTrue();
+
+    List<AccessBlacklist> findByEnabledTrueAndTargetTypeAndTargetValueIn(String targetType, java.util.Collection<String> values);
 }

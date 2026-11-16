@@ -33,8 +33,8 @@ public class ScheduledArticlePublisher {
 
     @Scheduled(fixedDelay = 60_000)
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
-    public void publishDueArticles() {
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true, condition="#result > 0")
+    public int publishDueArticles() {
         try {
             OffsetDateTime now = OffsetDateTime.now();
             var dueArticles = articleRepository.findByStatusAndScheduledPublishAtLessThanEqualAndDeletedAtIsNull(ArticleStatus.SCHEDULED, now);
@@ -42,11 +42,8 @@ public class ScheduledArticlePublisher {
                 article.setStatus(ArticleStatus.PUBLISHED);
                 article.setPublishedAt(now);
                 article.setScheduledPublishAt(null);
-                try {
-                    emailSubscriptionService.notifyNewArticle(article.getTitle(), publicSiteUrl + "/article/" + article.getId());
-                } catch (Exception notifyEx) {
-                    log.warn("定时发布订阅通知失败 articleId={}", article.getId(), notifyEx);
-                }
+                articleRepository.saveAndFlush(article);
+                emailSubscriptionService.enqueueArticle(article);
             }
             // 定时下架：已发布且到期 → 回退草稿并清发布时间
             var dueUnpublish = articleRepository.findByStatusAndScheduledUnpublishAtLessThanEqualAndDeletedAtIsNull(ArticleStatus.PUBLISHED, now);
@@ -57,6 +54,7 @@ public class ScheduledArticlePublisher {
                 log.info("定时下架文章 articleId={} title={}", article.getId(), article.getTitle());
             }
             articleRepository.flush();
+            return dueArticles.size()+dueUnpublish.size();
         } catch (Exception ex) {
             log.error("定时文章发布/下架失败", ex);
             notificationService.sendAlert("P1", "scheduled-article-publisher", "定时文章发布/下架失败：" + ex.getMessage(), "/admin/article/list");

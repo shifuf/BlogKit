@@ -53,8 +53,8 @@
           </div>
 
           <ul class="ie-card__scope">
-            <li><CheckOutlined />系统配置 + 分类 + 标签</li>
-            <li><CheckOutlined />文章 + 动态 + 友链</li>
+            <li><CheckOutlined />账号与密钥 + 全部业务表与权限关系</li>
+            <li><CheckOutlined />文章 + 评论 + 文件记录 + 互动 + 订阅与通知</li>
             <li class="ie-card__scope-warn"><WarningOutlined />不含 uploads 文件本体，需单独备份上传目录</li>
           </ul>
 
@@ -62,10 +62,11 @@
             class="ie-card__alert"
             type="warning"
             show-icon
-            message="导入完整备份会写入大量数据，建议先导出当前备份再操作。"
+            message="版本2完整数据库恢复会替换当前全部业务数据。系统会先生成加密备份；请确认目标数据库版本一致。"
           />
 
           <div class="ie-card__actions">
+            <a-button @click="createEncryptedBackup" :loading="operating">生成加密备份</a-button><a-button @click="drillBackup" :loading="operating">演练最近备份</a-button><a-button @click="loadBackupStatus">刷新状态</a-button>
             <a-button type="primary" @click="downloadBackup">
               <template #icon><DownloadOutlined /></template>
               导出完整备份
@@ -80,12 +81,14 @@
         </a-card>
       </a-col>
     </a-row>
+    <a-card title="加密备份状态" :bordered="false" style="margin-top:20px"><p>数据库全表备份会保留权限、账号密钥和通知任务。上传文件本体由服务器物理备份保存；恢复时应同时还原文件目录。</p><p>目录：{{backupState?.backupDir}}</p><p v-if="backupState?.latestDrill">最近演练：{{backupState.latestDrill.ok?'成功':'失败'}} · {{backupState.latestDrill.message}}</p><a-table row-key="fileName" :data-source="backupState?.recentBackups||[]" :columns="[{title:'文件',dataIndex:'fileName'},{title:'字节',dataIndex:'sizeBytes'},{title:'时间',dataIndex:'createdAt'}]" :pagination="false" /></a-card>
   </div>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-import { message } from 'ant-design-vue';
+import { ref,onMounted } from 'vue';
+import { message,Modal } from 'ant-design-vue';
+import request from '@/utils/request';
 import {
   CheckOutlined,
   DatabaseOutlined,
@@ -95,6 +98,11 @@ import {
   WarningOutlined
 } from '@ant-design/icons-vue';
 import { exportSettings, importSettings, exportBackup, importBackup } from '@/api/Settings';
+const backupState=ref(null),operating=ref(false);
+const loadBackupStatus=async()=>{backupState.value=await request.get('/admin/settings/backup/status')};
+const createEncryptedBackup=async()=>{operating.value=true;try{await request.post('/admin/settings/backup/create');message.success('加密备份已保存');await loadBackupStatus()}finally{operating.value=false}};
+const drillBackup=async()=>{operating.value=true;try{const result=await request.post('/admin/settings/backup/drill');result.ok?message.success(result.message):message.error(result.message);await loadBackupStatus()}finally{operating.value=false}};
+onMounted(loadBackupStatus);
 const importingSettings = ref(false);
 const importingBackup = ref(false);
 const timestamp = () => {
@@ -154,7 +162,7 @@ const downloadBackup = async () => {
   message.success('完整备份 JSON 已下载');
 };
 const beforeImportBackup = file => {
-  importBackupFile(file);
+  Modal.confirm({title:'恢复版本2完整数据库？',content:'将替换当前全部业务表内容。恢复前会生成加密备份，上传文件需另行恢复。',okText:'确认恢复',async onOk(){await importBackupFile(file)}});
   return false;
 };
 const importBackupFile = async file => {

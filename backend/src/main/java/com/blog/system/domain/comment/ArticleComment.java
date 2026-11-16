@@ -32,6 +32,15 @@ public class ArticleComment {
     @ManyToOne(fetch = FetchType.LAZY)
     private ArticleComment parent;
 
+    // Scalar target ID deliberately survives deletion; parent remains the thread root.
+    private Long replyToCommentId;
+
+    @Column(length = 64)
+    private String replyToName;
+
+    @Column(length = 200)
+    private String replyToContent;
+
     @Column(nullable = false, length = 2000)
     private String content;
 
@@ -52,7 +61,8 @@ public class ArticleComment {
     @Column(nullable = false, columnDefinition = "bigint default 0")
     private long likeCount = 0;
 
-    @Column(nullable = false, columnDefinition = "bigint default 0")
+    // Updated exclusively by atomic repository SQL, never merged from a stale entity.
+    @Column(nullable = false, updatable = false, columnDefinition = "bigint default 0")
     private long replyCount = 0;
 
     @Column(nullable = false)
@@ -115,6 +125,13 @@ public class ArticleComment {
     public void setParent(ArticleComment parent) {
         this.parent = parent;
     }
+
+    public Long getReplyToCommentId() { return replyToCommentId; }
+    public void setReplyToCommentId(Long value) { replyToCommentId = value; }
+    public String getReplyToName() { return replyToName; }
+    public void setReplyToName(String value) { replyToName = value; }
+    public String getReplyToContent() { return replyToContent; }
+    public void setReplyToContent(String value) { replyToContent = value; }
 
     public String getContent() {
         return content;

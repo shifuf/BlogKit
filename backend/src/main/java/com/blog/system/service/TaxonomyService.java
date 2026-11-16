@@ -53,16 +53,29 @@ public class TaxonomyService {
         this.currentUserService = currentUserService;
     }
 
-    @Cacheable("publicCategories")
+    @Cacheable(cacheNames="publicCategories", condition="!#root.target.isAdminViewer()")
     public List<CategoryResponse> findCategories() {
         return toCategoryResponses(categoryRepository.findAllByOrderByDisplayOrderAscIdAsc(), ArticleStatus.PUBLISHED);
     }
 
-    @Cacheable("publicTags")
+    @Cacheable(cacheNames="publicTags", condition="!#root.target.isAdminViewer()")
     public List<TagResponse> findTags() {
+        Map<Long,Long> counts=new HashMap<>();
+        articleRepository.countPublicArticlesByTag(isAdminViewer()).forEach(row->counts.put(((Number)row[0]).longValue(),((Number)row[1]).longValue()));
         return tagRepository.findAllByOrderByNameAscIdAsc().stream()
-                .map(this::toPublicTagResponse)
+                .filter(tag->counts.getOrDefault(tag.getId(),0L)>0)
+                .map(tag->new TagResponse(tag.getId(),tag.getName(),tag.getSlug(),counts.get(tag.getId())))
                 .toList();
+    }
+
+    public boolean isAdminViewer() {
+        var user=currentUserService.getCurrentUserOrNull();
+        return user!=null && currentUserService.isAdmin(user);
+    }
+
+    @Cacheable(cacheNames="publicTagSummary", condition="!#root.target.isAdminViewer()")
+    public com.blog.system.web.dto.TagSummaryResponse findTagSummary() {
+        return new com.blog.system.web.dto.TagSummaryResponse(findTags(),articleRepository.countListablePublished(isAdminViewer()));
     }
 
     public List<CategoryResponse> findAdminCategories() {
@@ -150,7 +163,7 @@ public class TaxonomyService {
     }
 
     @Transactional
-    @CacheEvict(value = "publicTags", allEntries = true)
+    @CacheEvict(value = {"publicTags","publicTagSummary"}, allEntries = true)
     public TagResponse createTag(TaxonomyUpsertRequest request) {
         requireAdmin();
         String name = requireName(request.name(), "标签名称不能为空");
@@ -159,7 +172,7 @@ public class TaxonomyService {
     }
 
     @Transactional
-    @CacheEvict(value = "publicTags", allEntries = true)
+    @CacheEvict(value = {"publicTags","publicTagSummary"}, allEntries = true)
     public TagResponse updateTag(Long id, TaxonomyUpsertRequest request) {
         requireAdmin();
         ArticleTag tag = tagRepository.findById(id)
@@ -173,7 +186,7 @@ public class TaxonomyService {
     }
 
     @Transactional
-    @CacheEvict(value = "publicTags", allEntries = true)
+    @CacheEvict(value = {"publicTags","publicTagSummary"}, allEntries = true)
     public void deleteTag(Long id) {
         requireAdmin();
         if (!tagRepository.existsById(id)) {
@@ -255,7 +268,7 @@ public class TaxonomyService {
     private Map<Long, Long> directCategoryArticleCounts(ArticleStatus status) {
         List<Object[]> rows = status == null
                 ? articleRepository.countArticlesByCategory()
-                : articleRepository.countArticlesByCategoryAndStatus(status);
+                : articleRepository.countListableByCategory(isAdminViewer());
         Map<Long, Long> counts = new HashMap<>();
         for (Object[] row : rows) {
             if (row.length < 2 || row[0] == null || row[1] == null) {
@@ -276,15 +289,6 @@ public class TaxonomyService {
             total += categoryArticleCount(child, childrenByParentId, directCounts);
         }
         return total;
-    }
-
-    private TagResponse toPublicTagResponse(ArticleTag tag) {
-        return new TagResponse(
-                tag.getId(),
-                tag.getName(),
-                tag.getSlug(),
-                articleRepository.countByTags_IdAndStatus(tag.getId(), ArticleStatus.PUBLISHED)
-        );
     }
 
     private TagResponse toAdminTagResponse(ArticleTag tag) {

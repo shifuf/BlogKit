@@ -11,7 +11,7 @@ const loadYears = async () => {
   const res = await fetchArticleArchiveYears()
   years.value = res.success ? (res.data || []) : []
   if (!selectedYear.value && years.value.length) {
-    selectedYear.value = years.value[0]
+    selectedYear.value = years.value[0] ?? null
   }
 }
 

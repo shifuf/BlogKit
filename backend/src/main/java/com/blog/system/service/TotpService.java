@@ -113,14 +113,18 @@ public class TotpService {
     }
 
     @Transactional
-    public TotpSetupResponse setup() {
+    public TotpSetupResponse setup() { return setup(null); }
+
+    @Transactional
+    public TotpSetupResponse setup(String oldCode) {
         UserAccount u = current.requireCurrentUser();
         current.requireAdmin(u);
+        verify(u, oldCode);
         byte[] raw = new byte[20];
         random.nextBytes(raw);
         String secret = encodeBase32(raw);
-        u.setTotpSecretEncrypted(seal(secret));
-        u.setTotpEnabled(false);
+        u.setTotpPendingSecretEncrypted(seal(secret));
+        u.setTotpPendingExpiresAt(java.time.OffsetDateTime.now().plusMinutes(10));
         users.save(u);
         String label = url("博客系统:" + u.getUsername());
         String uri = "otpauth://totp/" + label + "?secret=" + secret + "&issuer=" + url("博客系统")
@@ -132,10 +136,18 @@ public class TotpService {
     public void confirm(String code) {
         UserAccount u = current.requireCurrentUser();
         current.requireAdmin(u);
-        String secret = requireSecret(u);
+        if (u.getTotpPendingSecretEncrypted() == null || u.getTotpPendingExpiresAt() == null
+                || u.getTotpPendingExpiresAt().isBefore(java.time.OffsetDateTime.now())) {
+            throw new BusinessException("请重新生成二步验证密钥");
+        }
+        String secret = open(u.getTotpPendingSecretEncrypted());
         if (!verifySecret(secret, code)) {
             throw new BusinessException("动态验证码错误");
         }
+        users.clearRecoveryCodes(u.getId());
+        u.setTotpSecretEncrypted(u.getTotpPendingSecretEncrypted());
+        u.setTotpPendingSecretEncrypted(null);
+        u.setTotpPendingExpiresAt(null);
         u.setTotpEnabled(true);
         users.save(u);
     }
@@ -145,11 +157,15 @@ public class TotpService {
         UserAccount u = current.requireCurrentUser();
         current.requireAdmin(u);
         verify(u, code);
+        users.clearRecoveryCodes(u.getId());
         u.setTotpEnabled(false);
         u.setTotpSecretEncrypted(null);
+        u.setTotpPendingSecretEncrypted(null);
+        u.setTotpPendingExpiresAt(null);
         users.save(u);
     }
 
+    @Transactional
     public void verify(UserAccount u, String code) {
         if (!u.isTotpEnabled()) {
             return;
@@ -157,9 +173,29 @@ public class TotpService {
         if (code == null || code.isBlank()) {
             throw new TotpRequiredException();
         }
-        if (!verifySecret(requireSecret(u), code)) {
+        if (!verifySecret(requireSecret(u), code) && !consumeRecoveryCode(u, code)) {
             throw new BusinessException("管理员动态验证码错误");
         }
+    }
+
+    @Transactional
+    public java.util.List<String> regenerateRecoveryCodes(String code) {
+        UserAccount u = current.requireCurrentUser();
+        current.requireAdmin(u);
+        if (!u.isTotpEnabled()) throw new BusinessException("请先启用二步验证");
+        verify(u, code);
+        users.clearRecoveryCodes(u.getId());
+        var result = new java.util.ArrayList<String>();
+        for (int i=0; i<10; i++) {
+            byte[] bytes = new byte[16]; random.nextBytes(bytes);
+            String recovery = java.util.HexFormat.of().formatHex(bytes);
+            users.insertRecoveryCode(u.getId(), OAuthStateService.hash(recovery));
+            result.add(recovery);
+        }
+        return result;
+    }
+    private boolean consumeRecoveryCode(UserAccount u, String code) {
+        return code != null && code.matches("[a-f0-9]{32}") && users.consumeRecoveryCode(u.getId(), OAuthStateService.hash(code)) == 1;
     }
 
     private String requireSecret(UserAccount u) {

@@ -50,25 +50,9 @@ public class ApplicationDataInitializer implements CommandLineRunner {
         this.adminDisplayName = adminDisplayName;
     }
 
-    // ddl-auto:update 不会改写既有约束：动态标题可空、文章可见性 UNLISTED 需去掉旧 check。
-    // 逐条执行；语法差异或约束已处理时忽略异常。
-    private void runSchemaMigrations() {
-        runDdlQuietly("ALTER TABLE article DROP CONSTRAINT IF EXISTS article_visibility_check");
-        runDdlQuietly("ALTER TABLE dynamic_post ALTER COLUMN title DROP NOT NULL");
-    }
-
-    private void runDdlQuietly(String sql) {
-        try {
-            entityManager.createNativeQuery(sql).executeUpdate();
-        } catch (Exception ignore) {
-            // ignore missing constraints / dialect differences
-        }
-    }
-
     @Override
     @Transactional
     public void run(String... args) {
-        runSchemaMigrations();
         ensureAdminAccount();
         ensureGuestAccount();
         ensureAdminMenus();

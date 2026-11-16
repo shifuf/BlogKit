@@ -106,6 +106,7 @@ const openForEdit = ({
   visible.value = true;
 };
 const confirm = async () => {
+  if (!props.articleId) { message.warning('请先保存文章草稿，再插入授权卡片'); return; }
   const text = form.text.trim();
   const url = form.url.trim();
   if (!text || !url) {

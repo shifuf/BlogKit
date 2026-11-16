@@ -54,7 +54,6 @@ public class VisitorIpStatService {
         return repository.findByIpAddress(ip.trim()).map(VisitorIpStat::getVisitCount).orElse(0L);
     }
 
-    @Transactional(readOnly = true)
     public PageResponse<Map<String, Object>> list(int page, int size, String keyword) {
         currentUserService.requireAdmin(currentUserService.requireCurrentUser());
         int safePage = Math.max(page, 0);
@@ -63,6 +62,8 @@ public class VisitorIpStatService {
         Page<VisitorIpStat> result = StringUtils.hasText(keyword)
                 ? repository.findByIpAddressContainingIgnoreCase(keyword.trim(), pageable)
                 : repository.findAll(pageable);
+        var addresses = result.getContent().stream().map(VisitorIpStat::getIpAddress).toList();
+        var blocked = addresses.isEmpty() ? java.util.Set.<String>of() : blacklistRepository.findByEnabledTrueAndTargetTypeAndTargetValueIn("IP", addresses).stream().map(com.blog.system.domain.system.AccessBlacklist::getTargetValue).collect(java.util.stream.Collectors.toSet());
         List<Map<String, Object>> items = result.getContent().stream().map(stat -> {
             Map<String, Object> row = new HashMap<>();
             row.put("id", stat.getId());
@@ -71,7 +72,7 @@ public class VisitorIpStatService {
             row.put("firstSeenAt", stat.getFirstSeenAt());
             row.put("lastSeenAt", stat.getLastSeenAt());
             row.put("region", visitorLocationService.resolveRegion(stat.getIpAddress()));
-            row.put("blacklisted", blacklistRepository.existsByEnabledTrueAndTargetTypeAndTargetValue("IP", stat.getIpAddress()));
+            row.put("blacklisted", blocked.contains(stat.getIpAddress()));
             return row;
         }).toList();
         return new PageResponse<>(items, safePage, safeSize, result.getTotalElements(), result.getTotalPages());

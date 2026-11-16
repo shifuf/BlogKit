@@ -90,7 +90,8 @@
             </div>
             <div v-if="record.parentId" class="muted">
               回复 #{{ record.parentId }}
-              <template v-if="record.replyTo"> · @{{ record.replyTo }}</template>
+              <template v-if="record.replyTo"> · 回复 @{{ record.replyTo }}（#{{ record.replyToCommentId }}）</template>
+              <blockquote v-if="record.replyToContent">{{ record.replyToContent }}</blockquote>
             </div>
           </template>
           <template v-if="column.dataIndex === 'status'">
@@ -187,6 +188,7 @@
                 <span v-if="item.authorEmail" class="muted"> · {{ item.authorEmail }}</span>
               </template>
               <template #description>
+                <blockquote v-if="item.replyTo">回复 @{{ item.replyTo }}（#{{ item.replyToCommentId }}）<p>{{ item.replyToContent || '原评论已不可用' }}</p></blockquote>
                 <p class="comment-content">{{ item.content }}</p>
                 <span>
                   <a-tag :color="statusMap[item.status]?.color">{{ statusMap[item.status]?.label || item.status || '已通过' }}</a-tag>
@@ -201,6 +203,7 @@
           <a-empty description="暂无回复" />
         </template>
       </a-list>
+      <a-button v-if="replyList.length < replyTotal" :loading="replyLoading" @click="loadReplies(currentComment, true)">加载更多回复</a-button>
     </a-modal>
   </div>
 </template>
@@ -284,6 +287,8 @@ const loading = ref(false);
 const replyVisible = ref(false);
 const currentComment = ref(null);
 const replyList = ref([]);
+const replyPage = ref(1);
+const replyTotal = ref(0);
 const replyLoading = ref(false);
 const getList = async () => {
   loading.value = true;
@@ -383,11 +388,14 @@ const viewReplies = async record => {
   replyVisible.value = true;
   await loadReplies(record);
 };
-const loadReplies = async record => {
+const loadReplies = async (record, append = false) => {
+  if (!append) replyPage.value = 1;
   replyLoading.value = true;
   try {
-    const page = await getMessageList({ pageNum: 1, pageSize: 100, parentId: record.id });
-    replyList.value = page.items;
+    const page = await getMessageList({ pageNum: replyPage.value, pageSize: 20, parentId: record.parentId || record.id });
+    replyList.value = append ? [...replyList.value, ...page.items] : page.items;
+    replyTotal.value = page.totalItems || 0;
+    replyPage.value += 1;
   } finally {
     replyLoading.value = false;
   }

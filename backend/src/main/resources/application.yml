@@ -37,6 +37,8 @@ spring:
     properties:
       hibernate:
         format_sql: true
+        query:
+          fail_on_pagination_over_collection_fetch: true
         jdbc:
           time_zone: Asia/Shanghai
           batch_size: 50
@@ -62,7 +64,7 @@ sa-token:
   # 即「活跃即续期，最长 7 天空闲」——用户只要 7 天内有访问就保持登录，实现无感刷新，无需独立 refresh token。
   active-timeout: ${SA_TOKEN_ACTIVE_TIMEOUT:604800}
   is-concurrent: true
-  is-share: true
+  is-share: false
   token-style: uuid
   is-log: false
   # 不向浏览器写可读 cookie：前后端均用 Authorization: Bearer 头传 token（存 localStorage）。
@@ -104,6 +106,7 @@ blog:
   security:
     # 客户端与本服务之间会向 X-Forwarded-For 追加条目的可信反代跳数（nginx 追加 1 跳；防 XFF 伪造）。
     trusted-proxy-count: ${BLOG_TRUSTED_PROXY_COUNT:1}
+    trusted-proxy-cidrs: ${BLOG_TRUSTED_PROXY_CIDRS:127.0.0.1/32,::1/128}
     # 仅显式列出的主机可访问私网地址；本机通知平台/文件管理可保留 localhost，生产按需收紧。
     outbound-private-host-allowlist: ${BLOG_OUTBOUND_PRIVATE_HOST_ALLOWLIST:localhost,127.0.0.1,::1}
   backup:

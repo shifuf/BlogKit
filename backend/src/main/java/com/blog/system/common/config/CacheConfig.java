@@ -38,18 +38,20 @@ public class CacheConfig implements org.springframework.cache.annotation.Caching
         mapper.disable(com.fasterxml.jackson.databind.SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
         mapper.configure(com.fasterxml.jackson.databind.DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         mapper.activateDefaultTyping(
-                com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator.builder().allowIfBaseType(Object.class).build(),
+                com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator.builder().allowIfSubType("com.blog.system.web.dto.").allowIfSubType("com.blog.system.common.api.").allowIfSubType("com.blog.system.domain.").allowIfSubType("java.util.").allowIfSubType("java.time.").allowIfSubType("java.lang.").build(),
                 com.fasterxml.jackson.databind.ObjectMapper.DefaultTyping.EVERYTHING,
                 com.fasterxml.jackson.annotation.JsonTypeInfo.As.PROPERTY);
         GenericJackson2JsonRedisSerializer jsonSerializer = new GenericJackson2JsonRedisSerializer(mapper);
         RedisCacheConfiguration config = RedisCacheConfiguration.defaultCacheConfig()
                 .entryTtl(Duration.ofMinutes(30))
                 .disableCachingNullValues()
-                .computePrefixWith(name -> "blog:cache:" + name + "::")
+                .computePrefixWith(name -> "blog:cache:v2:" + name + "::")
                 .serializeKeysWith(RedisSerializationContext.SerializationPair.fromSerializer(new StringRedisSerializer()))
                 .serializeValuesWith(RedisSerializationContext.SerializationPair.fromSerializer(jsonSerializer));
         RedisCacheConfiguration publicArticleConfig = config.entryTtl(Duration.ofMinutes(2));
         return RedisCacheManager.builder(connectionFactory)
+                .transactionAware()
+                .enableStatistics()
                 .cacheDefaults(config)
                 .withCacheConfiguration("publicArticles", publicArticleConfig)
                 .build();

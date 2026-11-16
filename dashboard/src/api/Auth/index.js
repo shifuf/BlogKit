@@ -9,7 +9,8 @@ export function login(data) {
 export const logout = () => {
   return request.post('/auth/logout');
 };
-export const setupTotp = () => request.post('/admin/auth/totp/setup');
+export const setupTotp = code => request.post('/admin/auth/totp/setup', { code });
+export const recoveryCodes = code => request.post('/admin/auth/totp/recovery-codes', { code });
 export const getTotpStatus = () => request.get('/admin/auth/totp/status');
 export const confirmTotp = code => request.post('/admin/auth/totp/confirm', { code });
 export const disableTotp = code => request.post('/admin/auth/totp/disable', { code });

@@ -107,28 +107,28 @@ const signSubtitleOf = (slide: HeroSlide) => (slide.signEnabled ? String(slide.s
     <!-- 单图 -->
     <div v-if="slides.length === 1" class="hero-single">
       <a
-        v-if="linkOf(slides[0]) && isExternal(linkOf(slides[0]))"
-        :href="linkOf(slides[0])"
+        v-if="linkOf(slides[0]!) && isExternal(linkOf(slides[0]!))"
+        :href="linkOf(slides[0]!)"
         target="_blank"
         rel="noopener noreferrer"
         class="slider-component__link"
       >
-        <img :src="imageOf(slides[0])" :alt="altOf(slides[0])" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
+        <img :src="imageOf(slides[0]!)" :alt="altOf(slides[0]!)" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
       </a>
-      <NuxtLink v-else-if="linkOf(slides[0])" :to="linkOf(slides[0])" class="slider-component__link">
-        <img :src="imageOf(slides[0])" :alt="altOf(slides[0])" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
+      <NuxtLink v-else-if="linkOf(slides[0]!)" :to="linkOf(slides[0]!)" class="slider-component__link">
+        <img :src="imageOf(slides[0]!)" :alt="altOf(slides[0]!)" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
       </NuxtLink>
       <div v-else class="slider-component__link is-static">
-        <img :src="imageOf(slides[0])" :alt="altOf(slides[0])" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
+        <img :src="imageOf(slides[0]!)" :alt="altOf(slides[0]!)" width="1100" height="300" loading="eager" decoding="async" fetchpriority="high" />
       </div>
-      <div v-if="signTitlePartsOf(slides[0]).length || signSubtitleOf(slides[0])" class="hero-sign">
-        <h2 v-if="signTitlePartsOf(slides[0]).length" class="hero-sign__title">
-          <template v-for="(part, index) in signTitlePartsOf(slides[0])" :key="`${part}-${index}`">
+      <div v-if="signTitlePartsOf(slides[0]!).length || signSubtitleOf(slides[0]!)" class="hero-sign">
+        <h2 v-if="signTitlePartsOf(slides[0]!).length" class="hero-sign__title">
+          <template v-for="(part, index) in signTitlePartsOf(slides[0]!)" :key="`${part}-${index}`">
             <br v-if="index > 0" />
             {{ part }}
           </template>
         </h2>
-        <div v-if="signSubtitleOf(slides[0])" class="hero-sign__subtitle">{{ signSubtitleOf(slides[0]) }}</div>
+        <div v-if="signSubtitleOf(slides[0]!)" class="hero-sign__subtitle">{{ signSubtitleOf(slides[0]!) }}</div>
       </div>
     </div>
 

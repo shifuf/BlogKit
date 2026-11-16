@@ -135,6 +135,7 @@ const resetForm = () => {
   form.items = [newItem()];
 };
 const confirm = async () => {
+  if (!props.articleId) { message.warning('请先保存文章草稿，再插入授权卡片'); return; }
   const items = form.items.map(it => ({
     platform: it.platform,
     name: (it.name || '').trim(),

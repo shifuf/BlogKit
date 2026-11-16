@@ -81,6 +81,7 @@ public class ArticleCommandService {
     private final OutboundUrlValidator outboundUrlValidator;
     private final EmailSubscriptionService emailSubscriptionService;
     private final String publicSiteUrl;
+    @org.springframework.beans.factory.annotation.Autowired private com.blog.system.common.util.PublicHttpFetcher publicFetcher;
 
     public ArticleCommandService(
             ArticleRepository articleRepository,
@@ -288,143 +289,15 @@ public class ArticleCommandService {
     }
 
     private String probeUrl(String rawUrl) {
-        HttpURLConnection connection = null;
         try {
-            // 统一校验：scheme/host/内网/CGNAT/ULA 等。
-            URI uri = outboundUrlValidator.validate(rawUrl);
-            String host = uri.getHost();
-            int port = uri.getPort() > 0 ? uri.getPort() : ("https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80);
-            InetAddress[] addresses = InetAddress.getAllByName(host);
-            InetAddress chosen = null;
-            for (InetAddress address : addresses) {
-                if (!isBlockedAddress(address)) {
-                    chosen = address;
-                    break;
-                }
-            }
-            if (chosen == null) {
-                return "禁止探测内网/本机地址";
-            }
-            // 用固定 IP 建连，Host 头保留原域名，降低 DNS 重绑定窗口。
-            String literalHost = chosen.getHostAddress();
-            if (chosen instanceof java.net.Inet6Address) {
-                literalHost = "[" + literalHost + "]";
-            }
-            String path = uri.getRawPath();
-            if (!StringUtils.hasText(path)) path = "/";
-            String query = uri.getRawQuery();
-            String target = uri.getScheme() + "://" + literalHost + ":" + port + path + (query == null ? "" : "?" + query);
-            URL url = URI.create(target).toURL();
-            connection = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
-            connection.setInstanceFollowRedirects(false);
-            connection.setConnectTimeout(1500);
-            connection.setReadTimeout(1500);
-            connection.setRequestMethod("HEAD");
-            connection.setRequestProperty("Host", host + (uri.getPort() > 0 ? ":" + uri.getPort() : ""));
-            connection.setRequestProperty("User-Agent", "BlogLinkScanner/1.0");
-            if (connection instanceof HttpsURLConnection https) {
-                // SNI 仍用原始 host，避免证书校验因 IP 直连失败。
-                https.setSSLSocketFactory(new SniSslSocketFactory(host, https.getSSLSocketFactory()));
-                https.setHostnameVerifier((hostname, session) -> host.equalsIgnoreCase(hostname) || host.equalsIgnoreCase(session.getPeerHost()));
-            }
-            int code = connection.getResponseCode();
-            if (code == HttpURLConnection.HTTP_BAD_METHOD || code == 405) {
-                connection.disconnect();
-                connection = (HttpURLConnection) url.openConnection(Proxy.NO_PROXY);
-                connection.setInstanceFollowRedirects(false);
-                connection.setConnectTimeout(1500);
-                connection.setReadTimeout(1500);
-                connection.setRequestMethod("GET");
-                connection.setRequestProperty("Host", host + (uri.getPort() > 0 ? ":" + uri.getPort() : ""));
-                connection.setRequestProperty("User-Agent", "BlogLinkScanner/1.0");
-                if (connection instanceof HttpsURLConnection https) {
-                    https.setSSLSocketFactory(new SniSslSocketFactory(host, https.getSSLSocketFactory()));
-                    https.setHostnameVerifier((hostname, session) -> host.equalsIgnoreCase(hostname) || host.equalsIgnoreCase(session.getPeerHost()));
-                }
-                code = connection.getResponseCode();
-            }
-            if (code >= 300 && code < 400) {
-                return "HTTP " + code + " 重定向（未跟随）";
-            }
-            if (code >= 400) {
-                return "HTTP " + code;
-            }
-            return null;
-        } catch (BusinessException ex) {
-            return ex.getMessage();
-        } catch (Exception ex) {
-            return ex.getClass().getSimpleName() + ": " + (ex.getMessage() == null ? "unreachable" : ex.getMessage());
-        } finally {
-            if (connection != null) connection.disconnect();
-        }
-    }
-
-    private boolean isBlockedAddress(InetAddress address) {
-        if (address.isAnyLocalAddress() || address.isLoopbackAddress() || address.isLinkLocalAddress()
-                || address.isSiteLocalAddress() || address.isMulticastAddress()) {
-            return true;
-        }
-        byte[] bytes = address.getAddress();
-        if (address instanceof java.net.Inet4Address) {
-            int first = bytes[0] & 0xff;
-            int second = bytes[1] & 0xff;
-            return first == 0 || first == 10 || first == 127 || first >= 224
-                    || (first == 100 && second >= 64 && second <= 127)
-                    || (first == 169 && second == 254)
-                    || (first == 172 && second >= 16 && second <= 31)
-                    || (first == 192 && second == 168);
-        }
-        if (address instanceof java.net.Inet6Address) {
-            int first = bytes[0] & 0xff;
-            return (first & 0xfe) == 0xfc || (first == 0xfe && ((bytes[1] & 0xc0) == 0x80));
-        }
-        return true;
-    }
-
-    /** 为 IP 直连补上原始域名的 SNI。 */
-    private static final class SniSslSocketFactory extends SSLSocketFactory {
-        private final String host;
-        private final SSLSocketFactory delegate;
-
-        private SniSslSocketFactory(String host, SSLSocketFactory delegate) {
-            this.host = host;
-            this.delegate = delegate;
-        }
-
-        private Socket configure(Socket socket) {
-            if (socket instanceof javax.net.ssl.SSLSocket sslSocket) {
-                try {
-                    javax.net.ssl.SSLParameters params = sslSocket.getSSLParameters();
-                    params.setServerNames(List.of(new javax.net.ssl.SNIHostName(host)));
-                    sslSocket.setSSLParameters(params);
-                } catch (Exception ignored) {
-                    // 某些 JDK/环境不支持自定义 SNI 时退回默认行为。
-                }
-            }
-            return socket;
-        }
-
-        @Override public String[] getDefaultCipherSuites() { return delegate.getDefaultCipherSuites(); }
-        @Override public String[] getSupportedCipherSuites() { return delegate.getSupportedCipherSuites(); }
-        @Override public Socket createSocket(Socket s, String host, int port, boolean autoClose) throws IOException {
-            return configure(delegate.createSocket(s, this.host, port, autoClose));
-        }
-        @Override public Socket createSocket(String host, int port) throws IOException {
-            return configure(delegate.createSocket(host, port));
-        }
-        @Override public Socket createSocket(String host, int port, InetAddress localHost, int localPort) throws IOException {
-            return configure(delegate.createSocket(host, port, localHost, localPort));
-        }
-        @Override public Socket createSocket(InetAddress host, int port) throws IOException {
-            return configure(delegate.createSocket(host, port));
-        }
-        @Override public Socket createSocket(InetAddress address, int port, InetAddress localAddress, int localPort) throws IOException {
-            return configure(delegate.createSocket(address, port, localAddress, localPort));
-        }
+            var result = publicFetcher.fetch(rawUrl, "text/html,*/*;q=0.1", 256_000, 1500);
+            return result.status() >= 200 && result.status() < 300 ? null : "HTTP " + result.status();
+        } catch (BusinessException blocked) { return blocked.getMessage(); }
+        catch (Exception unavailable) { return "无法完成探测（超时、响应过大或连接失败）"; }
     }
 
     @Transactional
-    @CacheEvict(cacheNames = {"publicSiteSettings", "publicArticles"}, allEntries = true)
+    @CacheEvict(cacheNames = {"publicSiteSettings", "publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse createArticle(ArticleUpsertRequest request) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -432,13 +305,14 @@ public class ArticleCommandService {
         applyRequest(article, request);
         article.setAuthor(currentUser);
         applyRequestedStatus(article, request.status() == null ? ArticleStatus.DRAFT : request.status());
-        Article saved = articleRepository.save(article);
+        Article saved = articleRepository.saveAndFlush(article);
+        emailSubscriptionService.enqueueArticle(saved);
         createVersion(saved, currentUser, "创建文章");
         return toManageResponse(saved);
     }
 
     @Transactional
-    @CacheEvict(cacheNames = {"publicSiteSettings", "publicArticles"}, allEntries = true)
+    @CacheEvict(cacheNames = {"publicSiteSettings", "publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse updateArticle(Long id, ArticleUpsertRequest request) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -448,16 +322,20 @@ public class ArticleCommandService {
             throw new BusinessException("文章已在回收站，请先恢复再编辑");
         }
         requireOwnerOrAdmin(article, currentUser);
+        if (request.version() == null || !article.getVersion().equals(request.version())) {
+            throw new com.blog.system.common.exception.EditConflictException("文章已被其他窗口修改，请比较最新版本后重新保存");
+        }
         applyRequest(article, request);
         applyRequestedStatus(article, request.status() == null ? article.getStatus() : request.status());
-        Article saved = articleRepository.save(article);
+        Article saved = articleRepository.saveAndFlush(article);
+        emailSubscriptionService.enqueueArticle(saved);
         createVersion(saved, currentUser, "更新文章");
         return toManageResponse(saved);
     }
 
     // 列表内联快捷修改：仅改传入字段，不触碰密码/指定用户等需额外输入项（非破坏性）。
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse updateArticleFlags(Long id, com.blog.system.web.dto.ArticleFlagsRequest request) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -519,14 +397,15 @@ public class ArticleCommandService {
         if (request.tagIds() != null) {
             article.setTags(resolveTags(request.tagIds()));
         }
-        Article saved = articleRepository.save(article);
+        Article saved = articleRepository.saveAndFlush(article);
+        emailSubscriptionService.enqueueArticle(saved);
         createVersion(saved, currentUser, "快捷修改");
         return toManageResponse(saved);
     }
 
     /** 批量快捷修改：最多 50 篇，逐条复用 updateArticleFlags 规则。 */
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public Map<String, Object> batchUpdateArticleFlags(List<Long> ids, com.blog.system.web.dto.ArticleFlagsRequest request) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -549,7 +428,7 @@ public class ArticleCommandService {
 
     // 置顶文章批量排序：仅更新置顶序号，越小越靠前。
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public void reorderStickyArticles(List<ArticleStickyOrderRequest> requests) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -566,7 +445,7 @@ public class ArticleCommandService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse reviewArticle(Long id, ReviewArticleRequest request) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -577,15 +456,12 @@ public class ArticleCommandService {
         }
         String action = request.action().trim().toUpperCase(Locale.ROOT);
         if ("APPROVE".equals(action)) {
-            boolean firstPublish = article.getPublishedAt() == null;
             article.setStatus(ArticleStatus.PUBLISHED);
             if (article.getPublishedAt() == null) {
                 article.setPublishedAt(OffsetDateTime.now());
             }
-            Article saved = articleRepository.save(article);
-            if (firstPublish) {
-                notifySubscribers(saved);
-            }
+            Article saved = articleRepository.saveAndFlush(article);
+        emailSubscriptionService.enqueueArticle(saved);
             return toManageResponse(saved);
         } else if ("REJECT".equals(action)) {
             article.setStatus(ArticleStatus.REJECTED);
@@ -597,7 +473,7 @@ public class ArticleCommandService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public void deleteArticle(Long id) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -612,7 +488,7 @@ public class ArticleCommandService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse restoreArticle(Long id) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -627,7 +503,7 @@ public class ArticleCommandService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public void purgeArticle(Long id) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -662,7 +538,7 @@ public class ArticleCommandService {
     }
 
     @Transactional
-    @CacheEvict(cacheNames = "publicArticles", allEntries = true)
+    @CacheEvict(cacheNames = {"publicArticles","publicTags","publicTagSummary","publicCategories"}, allEntries = true)
     public ArticleManageResponse restoreArticleVersion(Long articleId, Long versionId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
@@ -677,7 +553,8 @@ public class ArticleCommandService {
         article.setCoverImageUrl(version.getCoverImageUrl());
         article.setSourceType(version.getSourceType());
         article.setSourceUrl(version.getSourceUrl());
-        Article saved = articleRepository.save(article);
+        Article saved = articleRepository.saveAndFlush(article);
+        emailSubscriptionService.enqueueArticle(saved);
         createVersion(saved, currentUser, "恢复版本 #" + versionId);
         return toManageResponse(saved);
     }
@@ -905,7 +782,6 @@ public class ArticleCommandService {
     }
 
     private void applyRequestedStatus(Article article, ArticleStatus status) {
-        boolean firstPublish = status == ArticleStatus.PUBLISHED && article.getPublishedAt() == null;
         article.setStatus(status);
         if (status == ArticleStatus.SCHEDULED) {
             if (article.getScheduledPublishAt() == null) {
@@ -925,19 +801,6 @@ public class ArticleCommandService {
         }
         if (status != ArticleStatus.SCHEDULED) {
             article.setScheduledPublishAt(null);
-        }
-        if (firstPublish) {
-            // 事务提交后广播更稳妥，这里先同步调用（邮件失败已内部吞掉）
-            notifySubscribers(article);
-        }
-    }
-
-    private void notifySubscribers(Article article) {
-        if (article == null || article.getId() == null) return;
-        try {
-            emailSubscriptionService.notifyNewArticle(article.getTitle(), publicSiteUrl + "/article/" + article.getId());
-        } catch (Exception ignored) {
-            // 订阅通知失败不影响发布主流程
         }
     }
 
@@ -976,7 +839,7 @@ public class ArticleCommandService {
         if (content == null) {
             return "";
         }
-        return content
+        return SecretBlockFilter.publicText(content)
                 // 多行 :::bd-xxx ... :::
                 .replaceAll("(?s):::[\\w-]+[^\\n]*\\n.*?:::", " ")
                 // 单行 :::bd-download base64...
@@ -1099,7 +962,8 @@ public class ArticleCommandService {
                 article.getVisibility(),
                 new java.util.ArrayList<>(article.getAllowedUserIds()),
                 org.springframework.util.StringUtils.hasText(article.getAccessPasswordHash()),
-                article.isListedInPublic()
+                article.isListedInPublic(),
+                article.getVersion()
         );
     }
 }

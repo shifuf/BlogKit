@@ -63,7 +63,8 @@ public class ArticleController {
             throw new BusinessException("搜索过于频繁，请稍后再试");
         }
         PageResponse<ArticleSummaryResponse> response = articleQueryService.findPublishedArticles(page, size, categorySlug, tagSlug, keyword, sort);
-        searchAnalyticsService.recordSearch(keyword, response.totalItems());
+        try { searchAnalyticsService.recordSearch(keyword, response.totalItems()); }
+        catch (RuntimeException ex) { org.slf4j.LoggerFactory.getLogger(ArticleController.class).warn("Search analytics unavailable; serving search results"); }
         return ApiResponse.ok(response);
     }
 

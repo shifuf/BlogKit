@@ -6,7 +6,7 @@ import { toBlogArticle } from '~/utils/blog-adapter';
 const route = useRoute();
 const {
   fetchArticleSummaries,
-  fetchTags
+  fetchTagSummary
 } = useApiClient();
 definePageMeta({
   key: route => route.path
@@ -27,17 +27,11 @@ const sortOptions: { value: ArticleSort; label: string }[] = [
   { value: 'likes', label: '点赞' },
   { value: 'comments', label: '评论' }
 ];
-const { data: tagsData } = await useAsyncData<TagSummary[]>('tags-page-all-tags', async () => {
-  try {
-    const response = await fetchTags();
-    return response.success ? response.data : [];
-  } catch {
-    return [];
-  }
-}, {
-  default: () => []
-});
-const allTags = computed(() => tagsData.value || []);
+const { data: tagsData } = await useAsyncData('tags-page-summary', async () => {
+  const response = await fetchTagSummary();
+  return response.success ? response.data : { tags: [], totalArticles: 0 };
+}, { default: () => ({ tags: [] as TagSummary[], totalArticles: 0 }) });
+const allTags = computed(() => tagsData.value.tags);
 const selectedTagSegment = computed(() => {
   const tagParam = route.params.id;
   const rawSegment = Array.isArray(tagParam) ? tagParam[0] : tagParam;
@@ -49,6 +43,7 @@ const selectedTag = computed(() => {
   const lower = selectedTagSegment.value.toLowerCase();
   return allTags.value.find(tag => tag.slug?.toLowerCase() === lower || tag.name?.toLowerCase() === lower) || null;
 });
+if (!isAllTags.value && !selectedTag.value) throw createError({ statusCode: 404, message: '标签不存在' });
 const resolvedTagSlug = computed(() => selectedTag.value?.slug || null);
 const tagTitle = computed(() => {
   if (isAllTags.value) return '全部标签';
@@ -59,7 +54,7 @@ const tagDescription = computed(() => {
   return `浏览「${tagTitle.value}」标签下的文章。`;
 });
 const tagFilters = computed(() => {
-  const total = allTags.value.reduce((sum, tag) => sum + Number(tag.articleCount || 0), 0);
+  const total = tagsData.value.totalArticles;
   return [
     { id: 0, name: '全部', slug: 'all', articleCount: total },
     ...allTags.value
@@ -72,10 +67,7 @@ const isSelectedFilter = (tag: TagSummary) => {
   return tag.slug === selectedTag.value?.slug || tag.name === selectedTag.value?.name || tagRouteSegment(tag) === selectedTagSegment.value;
 };
 const buildFilters = () => {
-  const segment = selectedTagSegment.value;
-  const hasTagSegment = Boolean(segment) && !isAllTags.value;
-  const fallbackKeyword = !resolvedTagSlug.value && hasTagSegment ? segment : '';
-  const searchKeyword = keyword.value || fallbackKeyword;
+  const searchKeyword = keyword.value;
   return {
     ...(resolvedTagSlug.value ? { tagSlug: resolvedTagSlug.value } : {}),
     ...(searchKeyword ? { keyword: searchKeyword } : {}),

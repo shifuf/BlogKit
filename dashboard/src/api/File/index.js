@@ -1,8 +1,9 @@
 import request from '@/utils/request';
 
-export function uploadImage(formData) {
+export function uploadImage(formData, publicAccess = false) {
   return request({
     url: '/uploads',
+    params: { publicAccess: publicAccess === true },
     method: 'post',
     data: formData,
     headers: {

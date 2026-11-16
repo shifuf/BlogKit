@@ -35,6 +35,9 @@ export function saveOrUpdateArticle(data) {
   }
   return createArticle(data);
 }
+export function getArticleMediaPreviews(id) {
+  return request({ url: `/admin/articles/${id}/media-previews`, method: 'get' });
+}
 export function createArticle(data) {
   return request({
     url: '/admin/articles',
@@ -144,3 +147,5 @@ export async function batchDeleteArticle(ids) {
 export async function batchPurgeArticle(ids) {
   await Promise.all(ids.map(id => purgeArticle(id)));
 }
+
+export const checkArticleQuality = data => request({ url: "/admin/articles/quality-check", method: "post", data });

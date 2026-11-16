@@ -93,11 +93,14 @@ public class FileStorageService {
                     .header("Accept", "image/*,*/*;q=0.8")
                     .GET()
                     .build();
-            HttpResponse<byte[]> response = httpClient.send(request, HttpResponse.BodyHandlers.ofByteArray());
+            HttpResponse<InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            try (InputStream input = response.body()) {
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
                 throw new BusinessException("拉取图片失败：HTTP " + response.statusCode());
             }
-            byte[] body = response.body();
+            int limit = 15 * 1024 * 1024;
+            if (response.headers().firstValueAsLong("content-length").orElse(0) > limit) throw new BusinessException("图片过大，超过 15MB");
+            byte[] body = input == null ? null : input.readNBytes(limit + 1);
             if (body == null || body.length == 0) {
                 throw new BusinessException("图片内容为空");
             }
@@ -120,15 +123,29 @@ public class FileStorageService {
                 }
             }
             return body;
+            }
         } catch (BusinessException ex) {
             throw ex;
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new BusinessException("拉取图片被中断");
         } catch (Exception ex) {
-            throw new BusinessException("拉取图片失败：" + ex.getMessage());
+            throw new BusinessException("拉取图片失败");
         }
     }
 
     @Transactional
     public UploadResponse storeImage(MultipartFile file, UserAccount uploader) {
+        return storeImageWithPolicy(file, uploader, false);
+    }
+
+    /** Public resources are readable independently of article visibility. */
+    @Transactional
+    public UploadResponse storePublicImage(MultipartFile file, UserAccount uploader) {
+        return storeImageWithPolicy(file, uploader, true);
+    }
+
+    private UploadResponse storeImageWithPolicy(MultipartFile file, UserAccount uploader, boolean publicAccess) {
         if (file == null || file.isEmpty()) {
             throw new BusinessException("上传文件不能为空");
         }
@@ -145,7 +162,7 @@ public class FileStorageService {
             imageBytes = null;
         }
 
-        UnifiedFileManagerClient.UploadedFileItem uploadedFile = fileManagerClient.upload(file);
+        UnifiedFileManagerClient.UploadedFileItem uploadedFile = publicAccess ? fileManagerClient.uploadPublicImage(file) : fileManagerClient.upload(file);
         String url = uploadedFile.accessUrl();
         if (!StringUtils.hasText(url)) {
             throw new BusinessException("统一文件管理未返回文件访问地址");
@@ -156,7 +173,7 @@ public class FileStorageService {
 
         String fileName = StringUtils.hasText(uploadedFile.originalName()) ? uploadedFile.originalName() : originalFilename;
         long size = uploadedFile.size() > 0 ? uploadedFile.size() : file.getSize();
-        return new UploadResponse(fileName, url, size);
+        return new UploadResponse(fileName, url, size, uploadedFile.previewUrl(), uploadedFile.isPublic());
     }
 
     /**
@@ -186,7 +203,7 @@ public class FileStorageService {
         }
         String fileName = StringUtils.hasText(uploadedFile.originalName()) ? uploadedFile.originalName() : originalFilename;
         long size = uploadedFile.size() > 0 ? uploadedFile.size() : file.getSize();
-        return new UploadResponse(fileName, url, size);
+        return new UploadResponse(fileName, url, size, uploadedFile.previewUrl(), uploadedFile.isPublic());
     }
 
     @Transactional(readOnly = true)
@@ -335,7 +352,9 @@ public class FileStorageService {
                 asset.size(),
                 null,
                 "统一文件管理",
-                asset.createdAt()
+                asset.createdAt(),
+                asset.previewUrl(),
+                asset.isPublic()
         );
     }
 }

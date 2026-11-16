@@ -48,6 +48,12 @@ public class UserAccount {
     @Column(length = 512)
     private String totpSecretEncrypted;
 
+    @Column(length = 512)
+    private String totpPendingSecretEncrypted;
+    private OffsetDateTime totpPendingExpiresAt;
+    @Column(nullable = false)
+    private boolean emailVerified = false;
+
     @Column(nullable = false)
     private OffsetDateTime createdAt;
 
@@ -65,6 +71,13 @@ public class UserAccount {
     void preUpdate() {
         updatedAt = OffsetDateTime.now();
     }
+
+    public String getTotpPendingSecretEncrypted() { return totpPendingSecretEncrypted; }
+    public void setTotpPendingSecretEncrypted(String v) { totpPendingSecretEncrypted = v; }
+    public OffsetDateTime getTotpPendingExpiresAt() { return totpPendingExpiresAt; }
+    public void setTotpPendingExpiresAt(OffsetDateTime v) { totpPendingExpiresAt = v; }
+    public boolean isEmailVerified() { return emailVerified; }
+    public void setEmailVerified(boolean v) { emailVerified = v; }
 
     public Long getId() {
         return id;

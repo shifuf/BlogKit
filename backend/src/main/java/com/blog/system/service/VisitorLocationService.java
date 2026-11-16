@@ -27,6 +27,12 @@ public class VisitorLocationService {
     private static final String CACHE_KEY_PREFIX = "blog:iploc:";
     private static final long CACHE_TTL_DAYS = 7;
 
+    private final java.util.concurrent.ThreadPoolExecutor lookupExecutor = new java.util.concurrent.ThreadPoolExecutor(
+            2, 4, 30, TimeUnit.SECONDS, new java.util.concurrent.ArrayBlockingQueue<>(64), r -> {
+                Thread t=new Thread(r,"visitor-location");t.setDaemon(true);return t;
+            }, new java.util.concurrent.ThreadPoolExecutor.AbortPolicy());
+    private final java.util.Set<String> pending = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    @jakarta.annotation.PreDestroy void shutdown(){lookupExecutor.shutdownNow();}
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final HttpClient httpClient = HttpClient.newBuilder()
@@ -54,16 +60,18 @@ public class VisitorLocationService {
         } catch (Exception ex) {
             log.debug("IP 归属地缓存读取失败 ip={} err={}", ip, ex.getMessage());
         }
-        String region = queryRegion(ip);
-        if (region == null) {
-            return "";
+        // Cache misses never hold up a page or a DB transaction; only bounded workers perform I/O.
+        if (pending.add(ip)) {
+            try { lookupExecutor.execute(() -> {
+                try {
+                    String region=queryRegion(ip);
+                    try { redisTemplate.opsForValue().set(cacheKey, region==null?"":region,
+                            region==null?Duration.ofMinutes(10):Duration.ofDays(CACHE_TTL_DAYS)); }
+                    catch (RuntimeException unavailable) { log.debug("IP location cache unavailable"); }
+                } finally { pending.remove(ip); }
+            }); } catch (java.util.concurrent.RejectedExecutionException busy) { pending.remove(ip); }
         }
-        try {
-            redisTemplate.opsForValue().set(cacheKey, region, CACHE_TTL_DAYS, TimeUnit.DAYS);
-        } catch (Exception ex) {
-            log.debug("IP 归属地缓存写入失败 ip={} err={}", ip, ex.getMessage());
-        }
-        return region;
+        return "";
     }
 
     private String queryRegion(String ip) {
@@ -74,11 +82,13 @@ public class VisitorLocationService {
                     .header("User-Agent", "Mozilla/5.0")
                     .GET()
                     .build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            String body;
+            try(var input=response.body()){byte[] bytes=input.readNBytes(32_769);if(bytes.length>32_768)return null;body=new String(bytes,java.nio.charset.StandardCharsets.UTF_8);}
             if (response.statusCode() != 200) {
                 return null;
             }
-            JsonNode data = objectMapper.readTree(response.body()).path("data");
+            JsonNode data = objectMapper.readTree(body).path("data");
             if (data.isArray() && data.size() > 0) {
                 // location 形如「广东省深圳市 电信」，取空格前的省市部分。
                 String location = data.get(0).path("location").asText("");
@@ -92,20 +102,7 @@ public class VisitorLocationService {
     }
 
     private boolean isPrivateOrLocal(String ip) {
-        if (ip.equals("::1") || ip.equals("0:0:0:0:0:0:0:1") || ip.startsWith("localhost")) {
-            return true;
-        }
-        if (ip.startsWith("127.") || ip.startsWith("10.") || ip.startsWith("192.168.")) {
-            return true;
-        }
-        if (ip.startsWith("172.")) {
-            try {
-                int second = Integer.parseInt(ip.split("\\.")[1]);
-                return second >= 16 && second <= 31;
-            } catch (Exception ignore) {
-                return false;
-            }
-        }
-        return false;
+        var address=com.blog.system.common.util.ClientIpResolver.literal(ip);
+        return address==null || com.blog.system.common.util.OutboundUrlValidator.isPrivate(address);
     }
 }

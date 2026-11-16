@@ -42,7 +42,7 @@ import type { ComponentPublicInstance } from 'vue';
 import type { TagSummary } from '~/types/blog';
 const route = useRoute();
 const {
-  fetchTags
+  fetchTagSummary
 } = useApiClient();
 const drawerRef = ref<(ComponentPublicInstance & {
   open: () => void;
@@ -64,8 +64,7 @@ const isSelectedTag = (tag: TagSummary) => {
 const openDrawer = () => {
   drawerRef.value?.open();
 };
-const buildTagList = (tags: TagSummary[]) => {
-  const totalArticles = tags.reduce((total, tag) => total + tag.articleCount, 0);
+const buildTagList = (tags: TagSummary[], totalArticles: number) => {
   return [{
     id: 0,
     name: '全部',
@@ -75,9 +74,9 @@ const buildTagList = (tags: TagSummary[]) => {
 };
 onMounted(async () => {
   try {
-    const response = await fetchTags();
+    const response = await fetchTagSummary();
     if (response.success) {
-      tagSummaries.value = buildTagList(response.data);
+      tagSummaries.value = buildTagList(response.data.tags, response.data.totalArticles);
     }
   } catch {
     tagSummaries.value = fallbackTagSummaries;

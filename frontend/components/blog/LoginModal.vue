@@ -220,7 +220,7 @@ onUnmounted(() => {
                   <input v-model="loginForm.remember" type="checkbox">
                   <span>记住我</span>
                 </label>
-                <button class="login-modal__link" type="button">忘记密码？</button>
+                <NuxtLink class="login-modal__link" to="/account-recovery" @click="close">忘记密码？</NuxtLink>
               </div>
 
               <button class="login-modal__submit" type="submit" :disabled="isSubmitting">

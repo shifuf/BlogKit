@@ -39,19 +39,23 @@ public class AdminOpsController {
     public ApiResponse<Map<String, Object>> metrics() {
         currentUserService.requireAdmin(currentUserService.requireCurrentUser());
         Map<String, Object> result = new LinkedHashMap<>();
-        Timer http = meterRegistry.find("http.server.requests").timer();
+        var timers = meterRegistry.find("http.server.requests").timers();
+        long count = timers.stream().mapToLong(Timer::count).sum();
+        double totalMs = timers.stream().mapToDouble(t -> t.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS)).sum();
         double errors = meterRegistry.find("http.server.requests").tag("outcome", "SERVER_ERROR").timers().stream()
                 .mapToDouble(Timer::count).sum();
-        result.put("requests", http == null ? 0 : http.count());
+        result.put("requests", count);
         result.put("errors", errors);
-        result.put("averageMs", http == null ? 0 : Math.round(http.mean(java.util.concurrent.TimeUnit.MILLISECONDS) * 100) / 100.0);
-        result.put("maxMs", http == null ? 0 : Math.round(http.max(java.util.concurrent.TimeUnit.MILLISECONDS) * 100) / 100.0);
+        result.put("averageMs", count == 0 ? 0 : totalMs / count);
+        result.put("maxMs", timers.stream().mapToDouble(t -> t.max(java.util.concurrent.TimeUnit.MILLISECONDS)).max().orElse(0));
         result.put("jvmUsedBytes", gauge("jvm.memory.used"));
         result.put("jvmMaxBytes", gauge("jvm.memory.max"));
         result.put("systemCpu", gauge("system.cpu.usage"));
         result.put("processCpu", gauge("process.cpu.usage"));
         result.put("dbActive", gauge("hikaricp.connections.active"));
         result.put("dbPending", gauge("hikaricp.connections.pending"));
+        result.put("dbAcquireMeanMs", meterRegistry.find("hikaricp.connections.acquire").timers().stream().mapToDouble(t -> t.mean(java.util.concurrent.TimeUnit.MILLISECONDS)).average().orElse(0));
+        result.put("requestHistogram", "P95 可通过受保护的 /actuator/prometheus http_server_requests_seconds_bucket 聚合计算");
         double hits = counter("cache.gets", "result", "hit");
         double misses = counter("cache.gets", "result", "miss");
         result.put("cacheHits", hits);
@@ -62,8 +66,7 @@ public class AdminOpsController {
     }
 
     private double gauge(String name) {
-        var g = meterRegistry.find(name).gauge();
-        return g == null ? 0 : g.value();
+        return meterRegistry.find(name).gauges().stream().mapToDouble(io.micrometer.core.instrument.Gauge::value).filter(v -> Double.isFinite(v) && v >= 0).sum();
     }
 
     private double counter(String name, String tag, String value) {

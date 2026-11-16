@@ -27,6 +27,7 @@ public class EmailSubscriptionService {
     private final CurrentUserService currentUserService;
     private final SiteSettingRepository siteSettingRepository;
     private final String publicSiteUrl;
+    @org.springframework.beans.factory.annotation.Autowired private NotificationOutboxService outbox;
 
     public EmailSubscriptionService(
             EmailSubscriptionRepository repository,
@@ -50,11 +51,45 @@ public class EmailSubscriptionService {
         if (!StringUtils.hasText(row.getToken())) {
             row.setToken(UUID.randomUUID().toString().replace("-", ""));
         }
-        row.setEnabled(true);
-        row.setConfirmed(true);
+        if (row.isConfirmed() && row.isEnabled()) return row;
+        row.setEnabled(false);
+        row.setConfirmed(false);
         row.setUnsubscribedAt(null);
+        byte[] bytes=new byte[32];new java.security.SecureRandom().nextBytes(bytes);
+        String confirmation=java.util.Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+        row.setConfirmationTokenHash(OAuthStateService.hash(confirmation));
+        row.setConfirmationExpiresAt(OffsetDateTime.now().plusHours(24));
         if (row.getCreatedAt() == null) row.setCreatedAt(OffsetDateTime.now());
-        return repository.save(row);
+        EmailSubscription saved=repository.saveAndFlush(row);
+        outbox.enqueueConfirmation(saved.getId(),saved.getEmail(),confirmation);
+        return saved;
+    }
+    @Transactional public void confirm(String token){
+        if(token==null||!token.matches("[A-Za-z0-9_-]{43}")||repository.confirmToken(OAuthStateService.hash(token))!=1)throw new BusinessException("确认链接无效或已过期，请重新订阅");
+    }
+    @Transactional(propagation=org.springframework.transaction.annotation.Propagation.MANDATORY)
+    public void enqueueArticle(com.blog.system.domain.article.Article article){outbox.enqueueArticle(article);}
+
+    @Transactional(readOnly=true)
+    public Map<String,Object> preferences() {
+        var user=currentUserService.requireCurrentUser();
+        var row=StringUtils.hasText(user.getEmail())?repository.findByEmailIgnoreCase(user.getEmail()).orElse(null):null;
+        return Map.of("email", user.getEmail()==null?"":user.getEmail(), "emailVerified",user.isEmailVerified(),
+                "confirmed",row!=null&&row.isConfirmed(), "articleUpdates",row!=null&&row.isConfirmed()&&row.isEnabled());
+    }
+
+    @Transactional
+    public Map<String,Object> updatePreferences(boolean articleUpdates) {
+        var user=currentUserService.requireCurrentUser();
+        if(!user.isEmailVerified() || !StringUtils.hasText(user.getEmail()))throw new BusinessException("请先在账号安全中验证邮箱");
+        var row=repository.findByEmailIgnoreCase(user.getEmail()).orElseGet(EmailSubscription::new);
+        row.setEmail(user.getEmail().trim().toLowerCase(Locale.ROOT));
+        if(!StringUtils.hasText(row.getToken()))row.setToken(UUID.randomUUID().toString().replace("-",""));
+        // Verified email ownership plus this explicit preference change supplies the two opt-in steps.
+        row.setConfirmed(true);row.setEnabled(articleUpdates);
+        row.setUnsubscribedAt(articleUpdates?null:OffsetDateTime.now());
+        repository.saveAndFlush(row);
+        return preferences();
     }
 
     @Transactional
@@ -101,50 +136,6 @@ public class EmailSubscriptionService {
     @Transactional(readOnly = true)
     public List<String> activeEmails() {
         return repository.findByEnabledTrueAndConfirmedTrue().stream().map(EmailSubscription::getEmail).toList();
-    }
-
-    /** 新文发布时广播（走消息平台邮件模板；平台未配齐时静默跳过）。 */
-    public void notifyNewArticle(String title, String url) {
-        if (!externalNotificationService.isEnabled()) return;
-        List<EmailSubscription> subs = repository.findByEnabledTrueAndConfirmedTrue();
-        if (subs.isEmpty()) return;
-        String safeTitle = StringUtils.hasText(title) ? title.trim() : "新文章";
-        String viewUrl = StringUtils.hasText(url) ? url.trim() : publicSiteUrl + "/";
-        String siteName = resolveSiteName();
-        String subject = "【" + siteName + "】新文章：" + safeTitle;
-        for (EmailSubscription sub : subs) {
-            try {
-                String unsub = publicSiteUrl + "/api/v1/subscriptions/email/unsubscribe?token=" + sub.getToken();
-                String plain = String.join("\n",
-                        siteName + " 发布了新文章",
-                        "",
-                        "《" + safeTitle + "》",
-                        "阅读：" + viewUrl,
-                        "",
-                        "退订：" + unsub);
-                Map<String, Object> vars = new LinkedHashMap<>();
-                vars.put("siteName", siteName);
-                vars.put("articleTitle", safeTitle);
-                vars.put("title", safeTitle);
-                vars.put("viewUrl", viewUrl);
-                vars.put("url", viewUrl);
-                vars.put("unsubscribeUrl", unsub);
-                vars.put("appName", siteName);
-                vars.put("body", "博客发布了新文章《" + safeTitle + "》");
-                vars.put("actionUrl", viewUrl);
-                externalNotificationService.sendTemplatedEmail(
-                        sub.getEmail(),
-                        "templateNewArticle",
-                        "new_article",
-                        subject,
-                        plain,
-                        null,
-                        vars
-                );
-            } catch (Exception ignored) {
-                // 单封失败不影响其它订阅者
-            }
-        }
     }
 
     private String resolveSiteName() {

@@ -10,7 +10,7 @@
           </div>
           <div class="profile-banner__identity">
             <p class="profile-banner__eyebrow">个人中心</p>
-            <h1>{{ displayName }}</h1>
+            <nav><NuxtLink to="/reading">继续阅读 / 已读记录</NuxtLink> · <NuxtLink to="/series">系列阅读</NuxtLink></nav><h1>{{ displayName }}</h1>
             <p v-if="showUsernameHandle" class="profile-banner__username">@{{ profile?.username || userStore.username }}</p>
             <div class="profile-banner__badges">
               <span class="profile-badge profile-badge--role">
@@ -57,7 +57,7 @@
         <div class="profile-content">
           <template v-if="activeTab === 'profile'">
             <section class="profile-panel">
-              <h2><UserRound :size="18" aria-hidden="true" /> 编辑资料</h2>
+              <h2><UserRound :size="18" aria-hidden="true" /> 编辑资料</h2><NuxtLink to="/security">账号安全、验证邮箱与登录设备 →</NuxtLink>
               <el-form label-position="top">
                 <el-form-item label="显示名称">
                   <el-input v-model="profileForm.displayName" maxlength="64" show-word-limit />

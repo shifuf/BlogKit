@@ -77,6 +77,10 @@
         </a-form-item>
       </a-form>
     </a-modal>
+    <a-modal v-model:open="resetOpen" title="设置新密码" @ok="submitReset">
+      <a-alert message="请通过安全方式将新密码告知用户。重置后所有设备将退出。" type="info" show-icon />
+      <a-input-password v-model:value="resetValue" placeholder="输入 12 至 128 位新密码" autocomplete="new-password" style="margin-top:16px" />
+    </a-modal>
     <AttachmentPicker
       v-model:open="avatarPickerOpen"
       :multiple="false"
@@ -215,7 +219,7 @@ const uploadAvatar = async ({
 }) => {
   uploadingAvatar.value = true;
   try {
-    const result = await uploadImageWithCrop(file, { defaultPreset: '1:1', title: '裁剪头像' });
+    const result = await uploadImageWithCrop(file, { publicAccess: true, defaultPreset: '1:1', title: '裁剪头像' });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;
@@ -251,15 +255,12 @@ const submitForm = async () => {
   modalOpen.value = false;
   await loadUsers();
 };
-const resetPassword = record => {
-  Modal.confirm({
-    title: `重置 ${record.username} 的密码？`,
-    content: '默认重置为 123456，上线环境应立即要求用户修改密码。',
-    async onOk() {
-      await resetUserPassword(record.id);
-      message.success('密码已重置为 123456');
-    }
-  });
+const resetOpen = ref(false), resetValue = ref(''), resetTarget = ref(null);
+const resetPassword = record => { resetTarget.value = record; resetValue.value = ''; resetOpen.value = true; };
+const submitReset = async () => {
+  if (resetValue.value.length < 12 || resetValue.value.length > 128) { message.warning('请输入 12 至 128 位新密码'); return; }
+  await resetUserPassword(resetTarget.value.id, resetValue.value);
+  resetValue.value = ''; resetOpen.value = false; message.success('密码已重置，所有设备已退出');
 };
 const removeUser = async record => {
   await deleteUser(record.id);

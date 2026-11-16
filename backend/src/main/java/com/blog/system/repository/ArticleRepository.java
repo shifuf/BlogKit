@@ -86,76 +86,6 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     @EntityGraph(attributePaths = {"category", "author"})
     Page<Article> findDistinctByTags_SlugAndStatusAndDeletedAtIsNull(String tagSlug, ArticleStatus status, Pageable pageable);
 
-    @EntityGraph(attributePaths = {"category", "author"})
-    @Query(
-            value = """
-                    select distinct a from Article a
-                    left join a.tags t
-                    where a.status = :status
-                      and a.deletedAt is null
-                      and (
-                        :categorySlug is null
-                        or a.category.slug = :categorySlug
-                        or a.category.parentId in (
-                            select c.id from ArticleCategory c where c.slug = :categorySlug
-                        )
-                        or a.category.parentId in (
-                            select child.id from ArticleCategory child
-                            where child.parentId in (
-                                select parent.id from ArticleCategory parent where parent.slug = :categorySlug
-                            )
-                        )
-                      )
-                      and (:tagSlug is null or t.slug = :tagSlug)
-                      and (:includeAll = true or a.listedInPublic = true)
-                      and (
-                        :keyword is null
-                        or lower(a.title) like lower(concat('%', :keyword, '%'))
-                        or lower(a.summary) like lower(concat('%', :keyword, '%'))
-                        or lower(a.content) like lower(concat('%', :keyword, '%'))
-                        or lower(t.name) like lower(concat('%', :keyword, '%'))
-                        or lower(a.category.name) like lower(concat('%', :keyword, '%'))
-                      )
-                    """,
-            countQuery = """
-                    select count(distinct a) from Article a
-                    left join a.tags t
-                    where a.status = :status
-                      and a.deletedAt is null
-                      and (
-                        :categorySlug is null
-                        or a.category.slug = :categorySlug
-                        or a.category.parentId in (
-                            select c.id from ArticleCategory c where c.slug = :categorySlug
-                        )
-                        or a.category.parentId in (
-                            select child.id from ArticleCategory child
-                            where child.parentId in (
-                                select parent.id from ArticleCategory parent where parent.slug = :categorySlug
-                            )
-                        )
-                      )
-                      and (:tagSlug is null or t.slug = :tagSlug)
-                      and (:includeAll = true or a.listedInPublic = true)
-                      and (
-                        :keyword is null
-                        or lower(a.title) like lower(concat('%', :keyword, '%'))
-                        or lower(a.summary) like lower(concat('%', :keyword, '%'))
-                        or lower(a.content) like lower(concat('%', :keyword, '%'))
-                        or lower(t.name) like lower(concat('%', :keyword, '%'))
-                        or lower(a.category.name) like lower(concat('%', :keyword, '%'))
-                      )
-                    """
-    )
-    Page<Article> searchPublishedArticles(
-            @Param("status") ArticleStatus status,
-            @Param("categorySlug") String categorySlug,
-            @Param("tagSlug") String tagSlug,
-            @Param("keyword") String keyword,
-            @Param("includeAll") boolean includeAll,
-            Pageable pageable
-    );
-
     /**
      * 全文检索（优先 search_vector + ts_rank，pg_trgm/ILIKE 兜底）。
      * 返回按相关度排序的文章 id；调用方再按 id 批量加载实体并保持顺序。
@@ -187,10 +117,10 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
                         )
                       )
                       and (
-                        a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar))
-                        or a.title ilike concat('%', cast(:keyword as varchar), '%')
-                        or a.summary ilike concat('%', cast(:keyword as varchar), '%')
-                        or a.content ilike concat('%', cast(:keyword as varchar), '%')
+                        ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar)))
+                        or lower(a.title) like concat('%', lower(cast(:keyword as varchar)), '%')
+                        or ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and lower(a.summary) like concat('%', lower(cast(:keyword as varchar)), '%'))
+                        or ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and lower(a.public_content) like concat('%', lower(cast(:keyword as varchar)), '%'))
                         or exists (
                             select 1 from article_tag_relation r2
                             join article_tag t2 on t2.id = r2.tag_id
@@ -199,7 +129,7 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
                         or c.name ilike concat('%', cast(:keyword as varchar), '%')
                       )
                     order by
-                      case when a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar))
+                      case when ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar)))
                         then ts_rank(a.search_vector, plainto_tsquery('simple', cast(:keyword as varchar)))
                         else 0 end desc,
                       a.sticky desc,
@@ -233,10 +163,10 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
                         )
                       )
                       and (
-                        a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar))
-                        or a.title ilike concat('%', cast(:keyword as varchar), '%')
-                        or a.summary ilike concat('%', cast(:keyword as varchar), '%')
-                        or a.content ilike concat('%', cast(:keyword as varchar), '%')
+                        ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and a.search_vector @@ plainto_tsquery('simple', cast(:keyword as varchar)))
+                        or lower(a.title) like concat('%', lower(cast(:keyword as varchar)), '%')
+                        or ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and lower(a.summary) like concat('%', lower(cast(:keyword as varchar)), '%'))
+                        or ((cast(:includeAll as boolean) = true or a.visibility = 'PUBLIC') and lower(a.public_content) like concat('%', lower(cast(:keyword as varchar)), '%'))
                         or exists (
                             select 1 from article_tag_relation r2
                             join article_tag t2 on t2.id = r2.tag_id
@@ -451,6 +381,15 @@ public interface ArticleRepository extends JpaRepository<Article, Long> {
     Optional<Article> findBySlug(String slug);
 
     boolean existsBySlug(String slug);
+
+    @Query("select t.id, count(distinct a.id) from Article a join a.tags t where a.status=com.blog.system.domain.article.ArticleStatus.PUBLISHED and a.deletedAt is null and (:includeAll=true or a.listedInPublic=true) group by t.id")
+    List<Object[]> countPublicArticlesByTag(@Param("includeAll") boolean includeAll);
+
+    @Query("select count(a) from Article a where a.status=com.blog.system.domain.article.ArticleStatus.PUBLISHED and a.deletedAt is null and (:includeAll=true or a.listedInPublic=true)")
+    long countListablePublished(@Param("includeAll") boolean includeAll);
+
+    @Query("select a.category.id,count(a) from Article a where a.status=com.blog.system.domain.article.ArticleStatus.PUBLISHED and a.deletedAt is null and (:includeAll=true or a.listedInPublic=true) group by a.category.id")
+    List<Object[]> countListableByCategory(@Param("includeAll") boolean includeAll);
 
     long countByTags_IdAndStatus(Long tagId, ArticleStatus status);
 

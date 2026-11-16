@@ -33,6 +33,11 @@ public record ArticleDetailResponse(
         // 访问控制：visibility=可见性；locked=当前访问者无权看正文（content 已置空）；requiresPassword=需输入密码解锁
         ArticleVisibility visibility,
         boolean locked,
-        boolean requiresPassword
+        boolean requiresPassword,
+        Long seriesId,
+        String seriesSlug,
+        String seriesName,
+        Integer seriesOrder,
+        Long version
 ) {
 }

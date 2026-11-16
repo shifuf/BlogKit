@@ -20,6 +20,7 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.security.MessageDigest;
 import java.time.Duration;
 import java.time.OffsetDateTime;
@@ -29,6 +30,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.CompletionStage;
+import java.util.concurrent.Flow;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Component
@@ -108,6 +112,15 @@ public class UnifiedFileManagerClient {
     }
 
     public UploadedFileItem upload(MultipartFile file) {
+        return upload(file, false);
+    }
+
+    /** Only for explicitly public assets such as avatars and public comment images. */
+    public UploadedFileItem uploadPublicImage(MultipartFile file) {
+        return upload(file, true);
+    }
+
+    private UploadedFileItem upload(MultipartFile file, boolean publicAccess) {
         FileManagerConfig config = resolveConfig();
         requireConfigured(config);
         Map<String, String> query = new TreeMap<>();
@@ -128,12 +141,22 @@ public class UnifiedFileManagerClient {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(bodyBytes))
                 .build();
 
-        JsonNode payload = unwrapPayload(sendJsonRequest(request));
+        JsonNode payload = sendJsonRequest(request);
         JsonNode fileNode = payload.isArray() ? payload.path(0) : payload;
         if (fileNode == null || fileNode.isMissingNode() || fileNode.isNull()) {
             throw new BusinessException("统一文件管理上传成功但未返回文件信息");
         }
-        return toUploadedFileItem(fileNode, config);
+        UploadedFileItem uploaded = toUploadedFileItem(fileNode, config);
+        if (publicAccess) {
+            byte[] publication = "{\"isPublic\":true}".getBytes(StandardCharsets.UTF_8);
+            HttpRequest publishRequest = signedRequestBuilder(config, "PUT", path + "/" + encodePathSegment(uploaded.id()), Map.of(), publication)
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofByteArray(publication)).build();
+            JsonNode published = sendJsonRequest(publishRequest);
+            if (!published.path("isPublic").asBoolean(false)) throw new BusinessException("统一文件管理未确认文件公开状态");
+            return toUploadedFileItem(published, config);
+        }
+        return uploaded;
     }
 
     public FilePage list(int page, int pageSize, String keyword) {
@@ -149,7 +172,7 @@ public class UnifiedFileManagerClient {
         HttpRequest request = signedRequestBuilder(config, "GET", openFilesPath(config), query, new byte[0])
                 .GET()
                 .build();
-        JsonNode payload = unwrapPayload(sendJsonRequest(request));
+        JsonNode payload = sendJsonRequest(request);
         JsonNode itemsNode = payload.path("items");
         List<UploadedFileItem> items = new ArrayList<>();
         if (itemsNode.isArray()) {
@@ -176,6 +199,46 @@ public class UnifiedFileManagerClient {
                 .DELETE()
                 .build();
         sendJsonRequest(request);
+    }
+
+    public String getTemporaryAccessUrl(String fileId) {
+        FileManagerConfig config = resolveConfig(); requireConfigured(config);
+        if (!StringUtils.hasText(fileId) || !fileId.matches("[A-Za-z0-9_-]{1,128}")) throw new BusinessException("附件 ID 无效");
+        HttpRequest request = signedRequestBuilder(config, "GET", openFilesPath(config) + "/" + encodePathSegment(fileId) + "/access-url", Map.of("expiresIn", "300"), new byte[0]).timeout(Duration.ofSeconds(5)).GET().build();
+        JsonNode issued = sendJsonRequest(request);
+        String url = textValue(issued, "url");
+        if (!StringUtils.hasText(url)) throw new BusinessException("统一文件管理未返回临时访问地址");
+        return resolveDisplayUrl(url, config);
+    }
+
+    /** Match only this configured service's canonical gateway, never a foreign origin. */
+    public String resolveManagedFileId(String rawUrl) {
+        return managedFileIdResolver().apply(rawUrl);
+    }
+
+    /** Snapshot configuration once when resolving all URLs in an article. */
+    public Function<String, String> managedFileIdResolver() {
+        FileManagerConfig config = resolveConfig();
+        return rawUrl -> resolveManagedFileId(rawUrl, config);
+    }
+
+    private String resolveManagedFileId(String rawUrl, FileManagerConfig config) {
+        if (!StringUtils.hasText(rawUrl)) return null;
+        try {
+            URI base = URI.create(config.baseUrl()); URI uri = URI.create(rawUrl.trim());
+            if (uri.getUserInfo() != null || uri.getFragment() != null || !uri.isAbsolute()
+                    || !java.util.Objects.equals(base.getScheme(), uri.getScheme())
+                    || !java.util.Objects.equals(base.getHost(), uri.getHost())
+                    || effectivePort(base) != effectivePort(uri)) return null;
+            String prefix = config.apiPrefix() + "/public/files/";
+            if (!uri.getRawPath().startsWith(prefix)) return null;
+            String id = uri.getRawPath().substring(prefix.length());
+            return id.matches("[A-Za-z0-9_-]{1,128}") ? id : null;
+        } catch (IllegalArgumentException ex) { return null; }
+    }
+
+    private int effectivePort(URI uri) {
+        return uri.getPort() >= 0 ? uri.getPort() : "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
     public ConnectionTestResult testConnection() {
@@ -246,18 +309,19 @@ public class UnifiedFileManagerClient {
 
     private JsonNode sendJsonRequest(HttpRequest request) {
         try {
-            HttpResponse<String> response = httpClient.send(
+            HttpResponse<byte[]> response = httpClient.send(
                     request,
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+                    boundedJsonBodyHandler()
             );
+            String responseBody = new String(response.body(), StandardCharsets.UTF_8);
             String requestPath = request.uri().getPath();
             if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException("统一文件管理请求失败 " + request.method() + " " + requestPath + "：" + response.statusCode() + externalErrorMessage(response.body()));
+                throw new BusinessException("统一文件管理请求失败 " + request.method() + " " + requestPath + "：" + response.statusCode() + externalErrorMessage(responseBody));
             }
-            if (!StringUtils.hasText(response.body())) {
+            if (!StringUtils.hasText(responseBody)) {
                 return objectMapper.createObjectNode();
             }
-            return objectMapper.readTree(response.body());
+            return objectMapper.readTree(responseBody);
         } catch (BusinessException exception) {
             throw exception;
         } catch (InterruptedException exception) {
@@ -268,33 +332,66 @@ public class UnifiedFileManagerClient {
         }
     }
 
+    private HttpResponse.BodyHandler<byte[]> boundedJsonBodyHandler() {
+        return info -> new HttpResponse.BodySubscriber<>() {
+            private final HttpResponse.BodySubscriber<byte[]> delegate = HttpResponse.BodySubscribers.ofByteArray();
+            private Flow.Subscription subscription;
+            private int remaining = 1024 * 1024;
+            private boolean finished;
+            public CompletionStage<byte[]> getBody() { return delegate.getBody(); }
+            public void onSubscribe(Flow.Subscription value) { subscription = value; delegate.onSubscribe(value); }
+            public void onNext(List<ByteBuffer> buffers) {
+                if (finished) return;
+                for (ByteBuffer buffer : buffers) {
+                    if (buffer.remaining() > remaining) {
+                        finished = true; subscription.cancel();
+                        delegate.onError(new IOException("统一文件管理响应超过 1MB")); return;
+                    }
+                    remaining -= buffer.remaining();
+                }
+                delegate.onNext(buffers);
+            }
+            public void onError(Throwable error) { if (!finished) { finished = true; delegate.onError(error); } }
+            public void onComplete() { if (!finished) { finished = true; delegate.onComplete(); } }
+        };
+    }
+
     private UploadedFileItem toUploadedFileItem(JsonNode node, FileManagerConfig config) {
         String id = textValue(node, "id");
-        String originalName = firstTextValue(node, "originalName", "fileName", "name");
-        String mimeType = firstTextValue(node, "mimeType", "contentType");
-        String accessUrl = firstTextValue(node, "accessUrl", "publicUrl", "url");
+        String originalName = textValue(node, "originalName");
+        String mimeType = textValue(node, "mimeType");
+        String accessUrl = textValue(node, "accessUrl");
+        if (!StringUtils.hasText(id) || (!StringUtils.hasText(accessUrl) && "ACTIVE".equals(textValue(node, "status")))) {
+            throw new BusinessException("统一文件管理返回的文件信息不符合新版接口契约");
+        }
+        if (!StringUtils.hasText(accessUrl) && !"RECYCLED".equals(textValue(node, "status"))) throw new BusinessException("统一文件管理未返回 accessUrl");
         if (StringUtils.hasText(accessUrl)) {
-            URI uri = URI.create(accessUrl.trim());
-            if (!uri.isAbsolute()) {
-                accessUrl = URI.create(config.baseUrl() + "/").resolve(uri).toString();
-            }
+            accessUrl = resolveDisplayUrl(accessUrl, config);
         }
         return new UploadedFileItem(
                 id,
                 originalName,
                 mimeType,
-                longValue(node, "size", longValue(node, "sizeBytes", 0)),
+                longValue(node, "size", 0),
                 accessUrl,
                 textValue(node, "status"),
-                parseDateTime(textValue(node, "createdAt"))
+                parseDateTime(textValue(node, "createdAt")),
+                StringUtils.hasText(textValue(node, "previewUrl")) ? resolveDisplayUrl(textValue(node, "previewUrl"), config) : node.path("isPublic").asBoolean(false) ? accessUrl : "",
+                node.path("isPublic").asBoolean(false)
         );
     }
 
-    private JsonNode unwrapPayload(JsonNode node) {
-        if (node != null && node.has("data")) {
-            return node.get("data");
-        }
-        return node;
+    private String resolveDisplayUrl(String rawUrl, FileManagerConfig config) {
+        try {
+            URI uri = URI.create(rawUrl.trim());
+            if (!uri.isAbsolute()) {
+                if (uri.getRawAuthority() != null || rawUrl.contains("\\")) throw new IllegalArgumentException();
+                uri = URI.create(config.baseUrl() + "/").resolve(uri);
+            }
+            if (!("http".equalsIgnoreCase(uri.getScheme()) || "https".equalsIgnoreCase(uri.getScheme()))
+                    || !StringUtils.hasText(uri.getHost()) || uri.getUserInfo() != null || uri.getFragment() != null) throw new IllegalArgumentException();
+            return uri.toString();
+        } catch (IllegalArgumentException ex) { throw new BusinessException("统一文件管理返回的文件访问地址无效"); }
     }
 
     private String sign(
@@ -469,8 +566,16 @@ public class UnifiedFileManagerClient {
             long size,
             String accessUrl,
             String status,
-            OffsetDateTime createdAt
+            OffsetDateTime createdAt,
+            String previewUrl,
+            boolean isPublic
     ) {
+        public UploadedFileItem(String id, String originalName, String mimeType, long size, String accessUrl, String status, OffsetDateTime createdAt) {
+            this(id, originalName, mimeType, size, accessUrl, status, createdAt, "", false);
+        }
+        public UploadedFileItem(String id, String originalName, String mimeType, long size, String accessUrl, String status, OffsetDateTime createdAt, String previewUrl) {
+            this(id, originalName, mimeType, size, accessUrl, status, createdAt, previewUrl, false);
+        }
     }
 
     public record FilePage(

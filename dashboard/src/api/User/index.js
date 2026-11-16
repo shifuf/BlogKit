@@ -19,7 +19,7 @@ export const updateUser = (id, data) => {
 export const addOrUpdateUser = data => {
   return data.id ? updateUser(data.id, data) : createUser(data);
 };
-export const resetUserPassword = (userId, password = '123456') => {
+export const resetUserPassword = (userId, password) => {
   return request.post(`/admin/users/${userId}/reset-password`, {
     password
   });

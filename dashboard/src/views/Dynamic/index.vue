@@ -269,7 +269,7 @@ const insertGallery = async files => {
         const formData = new FormData();
         formData.append('file', file);
         // eslint-disable-next-line no-await-in-loop
-        const result = await uploadImage(formData);
+        const result = await uploadImage(formData, true);
         if (result?.url) urls.push(result.url);
       }
       hide();
@@ -376,7 +376,7 @@ const applyAppearancePicked = urls => {
 const uploadBackground = async ({ file, onSuccess, onError }) => {
   apUploading.value = true;
   try {
-    const result = await uploadImageWithCrop(file, { defaultPreset: '16:9', title: '裁剪背景图' });
+    const result = await uploadImageWithCrop(file, { publicAccess: true, defaultPreset: '16:9', title: '裁剪背景图' });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;
@@ -397,7 +397,7 @@ const uploadBackground = async ({ file, onSuccess, onError }) => {
 const uploadAvatar = async ({ file, onSuccess, onError }) => {
   apUploading.value = true;
   try {
-    const result = await uploadImageWithCrop(file, { defaultPreset: '1:1', title: '裁剪头像' });
+    const result = await uploadImageWithCrop(file, { publicAccess: true, defaultPreset: '1:1', title: '裁剪头像' });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;
@@ -458,7 +458,7 @@ const uploadDynamicImages = async (files, callback) => {
       const formData = new FormData();
       formData.append('file', file);
       // eslint-disable-next-line no-await-in-loop
-      const result = await uploadImage(formData);
+      const result = await uploadImage(formData, true);
       if (result?.url) urls.push(result.url);
     }
     if (!urls.length) throw new Error('上传未返回地址');

@@ -26,7 +26,7 @@ const submit = async () => {
       method: 'POST',
       body: { email: value }
     })
-    message.value = '订阅成功，有新文章时会邮件通知你'
+    message.value = '确认邮件已加入发送队列，请前往邮箱点击确认链接'
     ok.value = true
     email.value = ''
   } catch (error: any) {

@@ -37,6 +37,7 @@ const {
   createComment,
   deleteComment,
   fetchComments,
+  fetchCommentReplies,
   reportComment,
   uploadCommentImage
 } = useApiClient();
@@ -131,12 +132,12 @@ const replyEmailFeatureEnabled = computed(() => Boolean(siteSettings.value.comme
 const notificationPlatformReady = computed(() => Boolean(siteSettings.value.notificationPlatformEnabled));
 // 勾选展示只看功能开关，避免平台 Key 未填时勾选被隐藏导致用户以为功能坏了
 const replyEmailAvailable = computed(() => replyEmailFeatureEnabled.value);
-const hasMoreComments = computed(() => comments.value.length < commentsTotal.value);
+const hasMoreComments = computed(() => comments.value.filter(c => !c.status || c.status === 'APPROVED').length < commentsTotal.value);
 const replyCount = (comment: CommentItem) => comment.replyCount ?? comment.replies?.length ?? 0;
 // 互动 = 根评论 + 回复。优先文章 commentCount；并用已加载树校验，避免漏计回复。
 const interactionTotal = computed(() => {
   const fromLoaded = comments.value.reduce(
-    (sum, item) => sum + 1 + Number(replyCount(item) || 0),
+    (sum, item) => sum + ((!item.status || item.status === 'APPROVED') ? 1 + Number(replyCount(item) || 0) : 0),
     0
   );
   const fromArticle = Math.max(0, Number(props.interactionCount || 0) + interactionDelta.value);
@@ -147,12 +148,35 @@ const visibleReplies = (comment: CommentItem) => {
   const replies = comment.replies ?? [];
   return isExpanded(comment.id) ? replies : replies.slice(0, 2);
 };
+const replyPages = ref<Record<number, number>>({});
+const repliesLoading = ref<Set<number>>(new Set());
+const loadMoreReplies = async (comment: CommentItem) => {
+  if (repliesLoading.value.has(comment.id)) return;
+  repliesLoading.value = new Set(repliesLoading.value).add(comment.id);
+  try {
+    const page = replyPages.value[comment.id] ?? 0;
+    const response = await fetchCommentReplies(comment.id, page, 10);
+    if (response.success) {
+      const incoming = response.data.items.map(toBlogComment);
+      const existing = page === 0 ? [] : (comment.replies || []);
+      comment.replies = [...existing, ...incoming.filter(item => !existing.some(c => c.id === item.id))];
+      comment.replyCount = response.data.totalItems;
+      replyPages.value[comment.id] = page + 1;
+    }
+  } catch (error) {
+    ElMessage.error(apiErrorMessage(error, '回复加载失败'));
+  } finally {
+    const next = new Set(repliesLoading.value); next.delete(comment.id); repliesLoading.value = next;
+  }
+};
 const toggleReplies = (id: number) => {
   const next = new Set(expandedThreads.value);
   if (next.has(id)) {
     next.delete(id);
   } else {
     next.add(id);
+    const root = findRootComment(id);
+    if (root && (root.replies?.length || 0) < replyCount(root)) void loadMoreReplies(root);
   }
   expandedThreads.value = next;
 };
@@ -364,6 +388,7 @@ const closeReply = () => {
 };
 const isReplyOpen = (rootId: number, targetId: number) => activeReply.value?.rootId === rootId && activeReply.value.targetId === targetId;
 const loadRemoteComments = async (append = false) => {
+  if (!import.meta.client || commentsClosed.value) return;
   if (!useRemoteComments.value || !props.articleId) {
     comments.value = [];
     commentsTotal.value = 0;
@@ -379,6 +404,7 @@ const loadRemoteComments = async (append = false) => {
     if (response.success) {
       const items = response.data.items.map(toBlogComment);
       comments.value = append ? [...comments.value, ...items] : items;
+      if (!append) replyPages.value = {};
       commentsTotal.value = response.data.totalItems ?? 0;
       commentsPage.value += 1;
     } else {
@@ -411,16 +437,19 @@ const submitComment = async () => {
     try {
       const response = await createComment(props.articleId, form.content.trim(), undefined, guestPayloadOf(form), form.notifyOnReply);
       if (response.success) {
-        comments.value.unshift(toBlogComment(response.data));
-        commentsTotal.value += 1;
-        interactionDelta.value += 1;
+        const posted = toBlogComment(response.data);
+        comments.value.unshift(posted);
+        if (response.data.status === 'APPROVED') {
+          commentsTotal.value += 1;
+          interactionDelta.value += 1;
+        }
         if (!userStore.isAuthenticated) {
           saveGuestProfile(form);
           rememberedGuestName.value = form.author.trim();
         }
         resetForm(form);
         notifyCommentPosted();
-        ElMessage.success(response.message || '评论已发布');
+        ElMessage.success(response.data.status === 'APPROVED' ? '评论已发布' : '评论已提交，审核通过后公开显示');
       }
     } catch (error) {
       ElMessage.error(apiErrorMessage(error, '评论发布失败'));
@@ -439,14 +468,14 @@ const submitReply = async () => {
   if (!root) return;
   if (useRemoteComments.value && props.articleId) {
     try {
-      const response = await createComment(props.articleId, replyForm.content.trim(), root.id, guestPayloadOf(replyForm), replyForm.notifyOnReply);
+      const response = await createComment(props.articleId, replyForm.content.trim(), activeReply.value.targetId, guestPayloadOf(replyForm), replyForm.notifyOnReply);
       if (response.success) {
         const reply = toBlogComment(response.data);
-        reply.replyTo = activeReply.value.targetAuthor;
         root.replies ??= [];
         root.replies.push(reply);
-        root.replyCount = (root.replyCount ?? root.replies.length - 1) + 1;
-        interactionDelta.value += 1;
+        const approved = reply.status === 'APPROVED';
+        root.replyCount = (root.replyCount ?? root.replies.length - 1) + (approved ? 1 : 0);
+        interactionDelta.value += approved ? 1 : 0;
         expandedThreads.value = new Set(expandedThreads.value).add(root.id);
         if (!userStore.isAuthenticated) {
           saveGuestProfile(replyForm);
@@ -458,7 +487,7 @@ const submitReply = async () => {
         }
         closeReply();
         notifyCommentPosted();
-        ElMessage.success(response.message || '回复已发布');
+        ElMessage.success(response.data.status === 'APPROVED' ? '回复已发布' : '回复已提交，审核通过后公开显示');
       }
     } catch (error) {
       ElMessage.error(apiErrorMessage(error, '回复发布失败'));
@@ -583,7 +612,7 @@ onMounted(() => {
         <div class="comment-editor__tools">
           <div class="comment-editor__tool-group" aria-label="评论工具">
             <button type="button" aria-label="图片" :disabled="imageUploading" @click="triggerImageUpload('main')"><Image :size="17" /></button>
-            <button type="button" aria-label="刷新" @click="loadRemoteComments"><RefreshCw :size="17" /></button>
+            <button type="button" aria-label="刷新" @click="loadRemoteComments(false)"><RefreshCw :size="17" /></button>
           </div>
           <span>{{ form.content.length }}/{{ maxCommentLength }}</span>
         </div>
@@ -652,7 +681,8 @@ onMounted(() => {
             </div>
 
             <time class="aero-comment__meta-line" :datetime="commentTimeSource(comment)" :title="absoluteCommentTime(comment)">{{ displayCommentTime(comment) }}</time>
-            <div class="aero-comment__content" v-html="renderCommentContent(comment.content)" />
+            <p v-if="comment.status && comment.status !== 'APPROVED'" role="status">待审核，暂未公开</p>
+          <div class="aero-comment__content" v-html="renderCommentContent(comment.content)" />
 
             <div class="aero-comment__tags">
               <span v-for="tag in metaTags(comment)" :key="tag">{{ tag }}</span>
@@ -694,7 +724,7 @@ onMounted(() => {
               <div class="comment-editor__tools">
                 <div class="comment-editor__tool-group" aria-label="回复工具">
                   <button type="button" aria-label="图片" :disabled="imageUploading" @click="triggerImageUpload('reply')"><Image :size="17" /></button>
-                  <button type="button" aria-label="刷新" @click="loadRemoteComments"><RefreshCw :size="17" /></button>
+                  <button type="button" aria-label="刷新" @click="loadRemoteComments(false)"><RefreshCw :size="17" /></button>
                 </div>
                 <span>{{ replyForm.content.length }}/{{ maxCommentLength }}</span>
               </div>
@@ -752,9 +782,13 @@ onMounted(() => {
 
                 <div class="aero-comment__meta-line">
                   <time :datetime="commentTimeSource(reply)" :title="absoluteCommentTime(reply)">{{ displayCommentTime(reply) }}</time>
-                  <template v-if="reply.replyTo"> 回复 @{{ reply.replyTo }}：</template>
                 </div>
-                <div class="aero-comment__content" v-html="renderCommentContent(reply.content)" />
+                <blockquote v-if="reply.replyTo" class="comment-reply-context">
+                回复 @{{ reply.replyTo }}<span v-if="reply.replyToUnavailable">（原评论已删除或暂不可见）</span>
+                <p v-else-if="reply.replyToContent">{{ reply.replyToContent }}</p>
+              </blockquote>
+              <p v-if="reply.status && reply.status !== 'APPROVED'" role="status">待审核，暂未公开</p>
+              <div class="aero-comment__content" v-html="renderCommentContent(reply.content)" />
 
                 <div class="aero-comment__tags">
                   <span v-for="tag in metaTags(reply)" :key="tag">{{ tag }}</span>
@@ -796,7 +830,7 @@ onMounted(() => {
                   <div class="comment-editor__tools">
                     <div class="comment-editor__tool-group" aria-label="回复工具">
                       <button type="button" aria-label="图片" :disabled="imageUploading" @click="triggerImageUpload('reply')"><Image :size="17" /></button>
-                      <button type="button" aria-label="刷新" @click="loadRemoteComments"><RefreshCw :size="17" /></button>
+                      <button type="button" aria-label="刷新" @click="loadRemoteComments(false)"><RefreshCw :size="17" /></button>
                     </div>
                     <span>{{ replyForm.content.length }}/{{ maxCommentLength }}</span>
                   </div>
@@ -822,9 +856,12 @@ onMounted(() => {
             </div>
           </template>
 
-          <button v-if="comment.replies.length > 2" class="aero-comment__expand" type="button" @click="toggleReplies(comment.id)">
+          <button v-if="replyCount(comment) > 2" class="aero-comment__expand" type="button" @click="toggleReplies(comment.id)">
             <ChevronDown :class="{ 'is-open': isExpanded(comment.id) }" :size="16" />
-            {{ isExpanded(comment.id) ? '收起回复' : '展开全部' }}
+            {{ isExpanded(comment.id) ? '收起回复' : `展开回复（${replyCount(comment)}）` }}
+          </button>
+          <button v-if="isExpanded(comment.id) && (comment.replies?.length || 0) < replyCount(comment)" class="aero-comment__expand" type="button" :disabled="repliesLoading.has(comment.id)" @click="loadMoreReplies(comment)">
+            {{ repliesLoading.has(comment.id) ? '加载中...' : '加载更多回复' }}
           </button>
         </div>
       </article>
@@ -847,6 +884,8 @@ onMounted(() => {
 </template>
 
 <style scoped lang="scss">
+.comment-reply-context { margin: 8px 0; padding: 8px 12px; border-left: 3px solid var(--theme-color); color: var(--text-secondary); background: var(--bg-soft); overflow-wrap: anywhere; }
+.comment-reply-context p { margin: 4px 0 0; font-size: 13px; }
 
 .comment-editor__preview {
   min-height: 96px;

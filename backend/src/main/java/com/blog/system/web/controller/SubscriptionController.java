@@ -34,8 +34,16 @@ public class SubscriptionController {
         if (!rateLimiter.tryAcquire("email-sub:" + ip, 5, 600_000)) {
             throw new BusinessException("订阅太频繁，请稍后再试");
         }
-        EmailSubscription row = subscriptionService.subscribe(body == null ? null : body.get("email"));
-        return ApiResponse.ok("订阅成功", Map.of("email", row.getEmail()));
+        String address=body==null?null:body.get("email");
+        if(address!=null&&!rateLimiter.tryAcquire("email-sub-target:"+Integer.toHexString(address.trim().toLowerCase(java.util.Locale.ROOT).hashCode()),3,3_600_000))throw new BusinessException("该邮箱申请频繁，请检查收件箱或稍后再试");
+        EmailSubscription row = subscriptionService.subscribe(address);
+        return ApiResponse.ok("确认邮件已加入发送队列，请前往邮箱确认", Map.of("email", row.getEmail()));
+    }
+
+    @PostMapping("/api/v1/subscriptions/email/confirm")
+    public ApiResponse<String> confirm(@RequestBody Map<String,String> body,HttpServletRequest request){
+        if(!rateLimiter.tryAcquire("email-confirm:"+clientIpResolver.resolve(request),10,600_000))throw new BusinessException("操作频繁");
+        subscriptionService.confirm(body.get("token"));return ApiResponse.ok("订阅已确认","订阅已确认");
     }
 
     @PostMapping("/api/v1/subscriptions/email/unsubscribe")
@@ -49,6 +57,15 @@ public class SubscriptionController {
     public ApiResponse<String> unsubscribeByQuery(@RequestParam(required = false) String token) {
         subscriptionService.unsubscribe(token);
         return ApiResponse.ok("已退订", "已退订邮件通知");
+    }
+
+    @GetMapping("/api/v1/subscriptions/email/preferences")
+    public ApiResponse<Map<String,Object>> preferences() { return ApiResponse.ok(subscriptionService.preferences()); }
+
+    @PutMapping("/api/v1/subscriptions/email/preferences")
+    public ApiResponse<Map<String,Object>> updatePreferences(@RequestBody Map<String,Boolean> body) {
+        if(body==null || !body.containsKey("articleUpdates"))throw new BusinessException("缺少通知偏好");
+        return ApiResponse.ok(subscriptionService.updatePreferences(Boolean.TRUE.equals(body.get("articleUpdates"))));
     }
 
     @GetMapping("/api/v1/admin/subscriptions/email")

@@ -166,7 +166,7 @@ const applyPicked = urls => {
 const uploadFor = async (slide, { file, onSuccess, onError }) => {
   slide.__uploading = true;
   try {
-    const result = await uploadImageWithCrop(file, { defaultPreset: '16:9', title: '裁剪 Banner' });
+    const result = await uploadImageWithCrop(file, { publicAccess: true, defaultPreset: '16:9', title: '裁剪 Banner' });
     if (!result) {
       onError?.(new Error('cancelled'));
       return;

@@ -63,7 +63,10 @@ service.interceptors.response.use(response => {
     }
     return Promise.reject(new Error(errorMsg));
   }
-  message.error(errorMsg);
-  return Promise.reject(new Error(errorMsg));
+  if (status !== 409) message.error(errorMsg);
+  const failure = new Error(errorMsg);
+  failure.status = status;
+  failure.response = error.response;
+  return Promise.reject(failure);
 });
 export default service;

@@ -18,7 +18,7 @@ const {
 } = useApiClient();
 const unreadNotifications = ref(0);
 const loadUnreadNotifications = async () => { if (!userStore.isAuthenticated) { unreadNotifications.value=0; return; } try { const r=await fetchNotificationUnreadCount(); unreadNotifications.value=r.success?Number(r.data.count||0):0; } catch {} };
-let unreadTimer: ReturnType<typeof window.setInterval> | undefined;
+let unreadTimer: number | undefined;
 const refreshUnreadWhenVisible = () => {
   if (document.visibilityState === 'visible') void loadUnreadNotifications();
 };
@@ -139,7 +139,7 @@ const navItems = computed<NavItem[]>(() => {
     entries.push({ order: item.order, id: item.id, item: item.item });
   });
   entries.sort((a, b) => (a.order - b.order) || (a.id - b.id));
-  return entries.map(entry => entry.item);
+  return [...entries.map(entry => entry.item), { label: '系列', to: '/series', icon: 'icon-archive' }, ...(userStore.isAuthenticated ? [{ label: '继续阅读', to: '/reading', icon: 'icon-article' }] : [])];
 });
 // 文章路由即挂沉浸顶栏 class；无 hero 时(404)靠 body:has(.article-detail-hero) 的 CSS 不把图标强行变白。
 const isArticlePage = computed(() => route.path.startsWith('/article/'));

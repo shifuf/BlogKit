@@ -194,24 +194,28 @@
             <text wx:if="{{item.region}}" class="comment__region">{{item.region}}</text>
           </view>
         </view>
+        <view wx:if="{{item.status && item.status !== 'APPROVED'}}" class="muted">待审核，暂未公开</view>
         <view class="comment__content">{{item.content}}</view>
         <view class="comment__actions">
           <text data-id="{{item.id}}" bindtap="tapCommentLike">赞 {{item.likeCount}}</text>
-          <text data-root="{{item.id}}" data-author="{{item.authorName}}" bindtap="openReply">回复{{item.replyCount ? ' ' + item.replyCount : ''}}</text>
+          <text data-root="{{item.id}}" data-target="{{item.id}}" data-author="{{item.authorName}}" bindtap="openReply">回复{{item.replyCount ? ' ' + item.replyCount : ''}}</text>
         </view>
 
         <view wx:if="{{item.replies.length}}" class="comment__replies">
           <view wx:for="{{item.replies}}" wx:for-item="reply" wx:key="id" class="comment__reply">
+            <view wx:if="{{reply.replyTo}}" class="comment__reply-context">回复 @{{reply.replyTo}}：{{reply.replyToUnavailable ? '原评论已删除或暂不可见' : reply.replyToContent}}</view>
+            <view wx:if="{{reply.status && reply.status !== 'APPROVED'}}" class="muted">待审核，暂未公开</view>
             <view class="comment__reply-line">
               <text class="comment__reply-author">{{reply.authorName}}：</text>{{reply.content}}
             </view>
             <view class="comment__reply-meta">
               <text wx:if="{{reply.region}}" class="comment__region">{{reply.region}}</text>
-              <text class="comment__reply-btn" data-root="{{item.id}}" data-author="{{reply.authorName}}" bindtap="openReply">回复</text>
+              <text class="comment__reply-btn" data-root="{{item.id}}" data-target="{{reply.id}}" data-author="{{reply.authorName}}" bindtap="openReply">回复</text>
             </view>
           </view>
         </view>
 
+        <button wx:if="{{item.replies.length < item.replyCount}}" class="ghost-button" data-root="{{item.id}}" loading="{{item.repliesLoading}}" bindtap="loadMoreReplies">加载更多回复</button>
         <view wx:if="{{activeReplyId === item.id}}" class="reply-composer">
           <textarea
             class="reply-composer__input"
@@ -227,6 +231,7 @@
           </view>
         </view>
       </view>
+      <button wx:if="{{comments.length < commentsTotal}}" class="ghost-button" loading="{{loadingComments}}" bindtap="loadMoreComments">加载更多评论</button>
     </view>
 
     <view wx:if="{{related.length}}" class="related">

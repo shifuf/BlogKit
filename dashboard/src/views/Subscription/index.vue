@@ -18,7 +18,7 @@
         type="info"
         show-icon
         class="tip"
-        message="前台弹窗订阅的邮箱列表。启用中的邮箱会在新文章发布时收到通知（需消息平台就绪）。"
+        message="仅确认邮箱所有权后启用订阅。历史未验证订阅需重新申请。公开文章通知持久排队，发送失败可重试。"
       />
       <a-table
         row-key="id"
@@ -29,7 +29,7 @@
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'enabled'">
-            <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled ? '启用' : '已退订' }}</a-tag>
+            <a-tag :color="record.enabled ? 'green' : 'default'">{{ record.enabled && record.confirmed ? '已确认启用' : record.confirmed ? '已退订' : '待确认' }}</a-tag>
           </template>
           <template v-else-if="column.dataIndex === 'action'">
             <a-space>
@@ -44,6 +44,9 @@
         </template>
       </a-table>
     </a-card>
+    <a-card title="通知投递记录" :bordered="false" style="margin-top:20px"><template #extra><a-button @click="loadJobs">刷新</a-button></template>
+      <a-table row-key="id" :data-source="jobs" :columns="jobColumns" :pagination="{pageSize:20}"><template #bodyCell="{column,record}"><template v-if="column.dataIndex==='action'"><a v-if="['FAILED','RETRY'].includes(record.status)" @click="retryJob(record.id)">重试</a></template></template></a-table>
+    </a-card>
   </div>
 </template>
 
@@ -53,6 +56,10 @@ import { message } from 'ant-design-vue';
 import request from '@/utils/request';
 import { formatDateTime } from '@/utils/date';
 
+const jobs=ref([]);const jobColumns=[{title:'收件人',dataIndex:'recipient'},{title:'类型',dataIndex:'kind'},{title:'状态',dataIndex:'status'},{title:'尝试',dataIndex:'attempts'},{title:'错误',dataIndex:'last_error'},{title:'操作',dataIndex:'action'}];
+const loadJobs=async()=>{jobs.value=await request.get('/admin/notifications/outbox')};
+const retryJob=async id=>{await request.post(`/admin/notifications/outbox/${id}/retry`);message.success('已排队重试');await loadJobs()};
+onMounted(loadJobs);
 const loading = ref(false);
 const keyword = ref('');
 const rows = ref([]);

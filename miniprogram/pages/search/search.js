@@ -26,6 +26,8 @@ Page({
   },
 
   clearKeyword() {
+    this.requestGeneration = (this.requestGeneration || 0) + 1;
+    this.setData({ loading: false });
     this.setData({ keywordInput: '', keyword: '', articles: [], finished: false });
   },
 
@@ -36,6 +38,8 @@ Page({
   },
 
   async refresh() {
+    this.requestGeneration = (this.requestGeneration || 0) + 1;
+    this.setData({ loading: false });
     if (!this.data.keyword) {
       wx.showToast({ title: '请输入关键词', icon: 'none' });
       return;
@@ -47,9 +51,11 @@ Page({
   async loadMore() {
     if (this.data.loading || this.data.finished) return;
     this.setData({ loading: true });
+    const generation = this.requestGeneration || 0;
     try {
       const page = this.data.page;
       const result = await blog.fetchArticles(page, this.data.size, { keyword: this.data.keyword, sort: 'latest' });
+      if (generation !== (this.requestGeneration || 0)) return;
       const items = (result?.items || result?.content || []).map(normalizeArticle);
       const totalPages = Number(result?.totalPages || 0);
       this.setData({
@@ -59,9 +65,10 @@ Page({
         finished: page + 1 >= totalPages || !items.length
       });
     } catch (error) {
+      if (generation !== (this.requestGeneration || 0)) return;
       wx.showToast({ title: (error && error.message) || '搜索失败', icon: 'none' });
     } finally {
-      this.setData({ loading: false });
+      if (generation === (this.requestGeneration || 0)) this.setData({ loading: false });
     }
   },
 

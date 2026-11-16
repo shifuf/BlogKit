@@ -1,6 +1,6 @@
 import { uploadImage, uploadFile } from '@/api/File';
 import { compressImage } from '@/utils/imageCompress';
-import { buildUfmCropUrl, isUfmPublicFileUrl, stripUfmTransformParams } from '@/utils/imageCropUrl';
+import { buildUfmCropUrl, isUfmPublicFileUrl, stripUfmTransformParams, stripUfmAccessParams } from '@/utils/imageCropUrl';
 
 let cropHost = null;
 
@@ -217,11 +217,12 @@ export async function cropImageFromUrl(url, options = {}) {
  */
 export async function cropLibraryImageUrl(url, options = {}) {
   if (!url) return null;
-  const baseUrl = stripUfmTransformParams(url) || url;
+  const stableUrl = stripUfmAccessParams(options.stableUrl || url);
+  const baseUrl = stripUfmTransformParams(stableUrl) || stableUrl;
 
   if (isUfmPublicFileUrl(baseUrl)) {
     if (options.skipCrop) return baseUrl;
-    const result = await cropImageFromUrl(baseUrl, {
+    const result = await cropImageFromUrl(url, {
       ...options,
       returnCropParams: true
     });
@@ -240,7 +241,8 @@ export async function cropLibraryImageUrl(url, options = {}) {
     target = await compressImage(target, options.compress || {});
     const formData = new FormData();
     formData.append('file', target);
-    const uploaded = await uploadImage(formData);
+    const uploaded = await uploadImage(formData, options.publicAccess === true);
+    options.onUploaded?.(uploaded);
     return uploaded?.url || baseUrl;
   }
   return baseUrl;
@@ -258,7 +260,7 @@ export async function uploadImageWithCrop(file, options = {}) {
   target = await compressImage(target, options.compress || {});
   const formData = new FormData();
   formData.append('file', target);
-  return uploadImage(formData);
+  return uploadImage(formData, options.publicAccess === true);
 }
 
 /**
@@ -272,7 +274,7 @@ export async function uploadAnyWithOptionalCrop(file, options = {}) {
   if (isImageFile(file)) {
     const formData = new FormData();
     formData.append('file', file);
-    return uploadImage(formData);
+    return uploadImage(formData, options.publicAccess === true);
   }
   const formData = new FormData();
   formData.append('file', file);
