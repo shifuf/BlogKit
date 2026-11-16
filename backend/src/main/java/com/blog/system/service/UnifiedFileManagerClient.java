@@ -133,7 +133,7 @@ public class UnifiedFileManagerClient {
         if (fileNode == null || fileNode.isMissingNode() || fileNode.isNull()) {
             throw new BusinessException("统一文件管理上传成功但未返回文件信息");
         }
-        return toUploadedFileItem(fileNode);
+        return toUploadedFileItem(fileNode, config);
     }
 
     public FilePage list(int page, int pageSize, String keyword) {
@@ -154,7 +154,7 @@ public class UnifiedFileManagerClient {
         List<UploadedFileItem> items = new ArrayList<>();
         if (itemsNode.isArray()) {
             for (JsonNode itemNode : itemsNode) {
-                items.add(toUploadedFileItem(itemNode));
+                items.add(toUploadedFileItem(itemNode, config));
             }
         }
 
@@ -188,7 +188,7 @@ public class UnifiedFileManagerClient {
                     .GET()
                     .build();
             sendJsonRequest(request);
-            return new ConnectionTestResult(true, "统一文件管理连接正常（签名验证通过）");
+            return new ConnectionTestResult(true, "统一文件管理接口连接正常（签名验证通过；文件公开访问权限需单独验证）");
         } catch (BusinessException exception) {
             return new ConnectionTestResult(false, exception.getMessage());
         } catch (Exception exception) {
@@ -268,11 +268,17 @@ public class UnifiedFileManagerClient {
         }
     }
 
-    private UploadedFileItem toUploadedFileItem(JsonNode node) {
+    private UploadedFileItem toUploadedFileItem(JsonNode node, FileManagerConfig config) {
         String id = textValue(node, "id");
         String originalName = firstTextValue(node, "originalName", "fileName", "name");
         String mimeType = firstTextValue(node, "mimeType", "contentType");
         String accessUrl = firstTextValue(node, "accessUrl", "publicUrl", "url");
+        if (StringUtils.hasText(accessUrl)) {
+            URI uri = URI.create(accessUrl.trim());
+            if (!uri.isAbsolute()) {
+                accessUrl = URI.create(config.baseUrl() + "/").resolve(uri).toString();
+            }
+        }
         return new UploadedFileItem(
                 id,
                 originalName,
