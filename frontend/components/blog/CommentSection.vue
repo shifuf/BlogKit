@@ -551,8 +551,6 @@ const reportCurrentComment = async (comment: CommentItem) => {
 watch(() => props.articleId, () => {
   interactionDelta.value = 0;
   void loadRemoteComments(false);
-}, {
-  immediate: true
 });
 watch(() => props.interactionCount, () => {
   // 文章侧 commentCount 刷新后，本地增量归零，避免重复累加。
@@ -560,6 +558,8 @@ watch(() => props.interactionCount, () => {
 });
 onMounted(() => {
   void loadSiteSettings();
+  // Start client-only requests after hydration; SSR renders the same idle state.
+  void loadRemoteComments(false);
   if (import.meta.client) {
     applyGuestProfile(form);
     applyGuestProfile(replyForm);
