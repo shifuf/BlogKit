@@ -180,6 +180,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <ClientOnly>
   <Teleport to="body">
     <div v-if="visible" class="login-modal-overlay" role="presentation" @click.self="close">
       <div class="login-modal" role="dialog" aria-modal="true" aria-labelledby="login-modal-title">
@@ -304,6 +305,7 @@ onUnmounted(() => {
       </div>
     </div>
   </Teleport>
+  </ClientOnly>
 </template>
 
 <style scoped lang="scss">

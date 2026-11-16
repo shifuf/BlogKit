@@ -31,6 +31,7 @@ watch(() => props.modelValue, async value => {
 </script>
 
 <template>
+  <ClientOnly>
   <Teleport to="body">
     <div class="search-modal" :class="{ open: visible }" @keydown.esc="visible = false">
       <div class="search-modal__overlay" @click="visible = false" />
@@ -53,4 +54,5 @@ watch(() => props.modelValue, async value => {
       </div>
     </div>
   </Teleport>
+  </ClientOnly>
 </template>

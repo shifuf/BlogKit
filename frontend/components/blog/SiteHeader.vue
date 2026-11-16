@@ -347,6 +347,7 @@ onUnmounted(() => {
           </nav>
         </div>
 
+        <ClientOnly>
         <button
           v-if="isArticlePage && currentArticleTitle"
           class="site-header__article-title"
@@ -357,6 +358,7 @@ onUnmounted(() => {
         >
           <span>{{ currentArticleTitle }}</span>
         </button>
+        </ClientOnly>
 
         <div class="site-header__actions">
           <button class="site-header__search-btn" type="button" aria-label="搜索" @click="searchOpen = true">
