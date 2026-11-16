@@ -5024,10 +5024,6 @@ body.login-modal-open {
     background: transparent;
   }
 
-  .site-header.site-header--article-mobile .site-logo-img {
-    filter: none;
-  }
-
   .site-header.site-header--article-mobile .site-header__search-btn,
   .site-header.site-header--article-mobile .theme-toggle,
   .site-header.site-header--article-mobile .nav-toggle {
@@ -5638,23 +5634,9 @@ body.login-modal-open {
   -webkit-backdrop-filter: none !important;
 }
 
-/* 仅当页面确实有 hero 时，未滚动顶栏图标/logo 变白，避免 404 白底白字。 */
-html:not([data-theme='dark']) body:has(.article-detail-hero) .site-header.site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-img,
-body:has(.article-detail-hero) .site-header.site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-img {
-  filter: url('#site-logo-white-glyphs') drop-shadow(0 1px 2px rgb(0 0 0 / 0.15)) !important;
-}
-
-.site-logo-filters { position: absolute; pointer-events: none; }
-/* The bundled dark bitmap also has a white canvas; derive dark-mode glyphs
-   from the inked source so scrolling does not bring back its white rectangle. */
-html[data-theme='dark'] .site-header .site-logo-light {
-  display: block;
-  filter: url('#site-logo-white-glyphs') !important;
-}
-html[data-theme='dark'] .site-header .site-logo-dark { display: none; }
-/* Use the original inked logo for the immersive filter, also in dark mode. */
-body:has(.article-detail-hero) .site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-light { display: block; }
-body:has(.article-detail-hero) .site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-dark { display: none; }
+/* 沉浸式页头直接使用透明白字原图，保留蓝色图标；滚动后按昼夜主题切换。 */
+body:has(.article-detail-hero) .site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-light { display: none; }
+body:has(.article-detail-hero) .site-header--article-mobile:not(.site-header--article-scrolled) .site-logo-dark { display: block; }
 
 html:not([data-theme='dark']) body:has(.article-detail-hero) .site-header.site-header--article-mobile:not(.site-header--article-scrolled) .nav-list li a,
 body:has(.article-detail-hero) .site-header.site-header--article-mobile:not(.site-header--article-scrolled) .site-header__search-btn,
@@ -5704,10 +5686,6 @@ html:not([data-theme='dark']) .site-header.site-header--article-mobile:not(.site
 .site-header.site-header--article-scrolled .site-logo {
   opacity: 1;
   pointer-events: auto;
-}
-
-.site-header.site-header--article-scrolled .site-logo-img {
-  filter: none;
 }
 
 .site-header.site-header--article-scrolled .site-header__search-btn,

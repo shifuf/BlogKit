@@ -9,7 +9,7 @@
     <div class="login-card">
       <div class="login-brand">
         <div class="login-brand__logo" style="display: none;">
-          <img src="/logo.png" alt="我的博客 Logo" />
+          <img :src="brandLogo" alt="我的博客 Logo" />
         </div>
         <h1 class="login-title">我的博客 后台管理</h1>
         <p class="login-subtitle">记录技术、项目与生活</p>
@@ -64,6 +64,7 @@
 
 <script setup>
 import { nextTick, reactive, ref } from 'vue';
+import { brandLogo } from '@/utils/brand';
 import { message } from 'ant-design-vue';
 import { UserOutlined, LockOutlined, SafetyCertificateOutlined } from '@ant-design/icons-vue';
 import { login } from '@/api/Auth';

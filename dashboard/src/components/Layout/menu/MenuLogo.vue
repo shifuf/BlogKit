@@ -1,12 +1,13 @@
 <template>
   <div class="logo">
-    <img v-show="!collapsed" src="/logo.png" alt="我的博客">
+    <img v-show="!collapsed" :src="brandLogo" alt="我的博客">
   </div>
 </template>
 
 <script setup>
 
 import { ref, reactive, computed, watch } from 'vue';
+import { brandLogo } from '@/utils/brand';
 import { collapseStore } from '../../../stores//modules/collapse.js';
 const store = collapseStore();
 const collapsed = computed(() => {

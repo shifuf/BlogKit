@@ -3,8 +3,8 @@ const asset = (path: string) => `/layout-interaction/static/picture/${path}`;
 export const siteMeta = {
   name: '我的博客',
   description: '记录技术、项目与生活',
-  logoLight: asset('site-logo.png'),
-  logoDark: asset('site-logo-dark.png'),
+  logoLight: '/brand/klshifu-black-v20261117.png',
+  logoDark: '/brand/klshifu-white-v20261117.png',
   avatar: asset('site-avatar.png'),
   hero: '',
   github: '',

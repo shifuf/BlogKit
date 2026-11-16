@@ -313,16 +313,6 @@ onUnmounted(() => {
     :class="{ 'site-header--article-mobile': isArticlePage, 'site-header--article-scrolled': articleTitleVisible, 'site-header--home': isHomePage }"
     style="--header-bg-image: none;"
   >
-    <svg class="site-logo-filters" aria-hidden="true" width="0" height="0" focusable="false">
-      <defs>
-        <filter id="site-logo-white-glyphs" color-interpolation-filters="sRGB">
-          <!-- The source logo has an opaque white background. Use its ink as alpha
-               before painting it white, preserving antialiasing and transparent space. -->
-          <feColorMatrix in="SourceGraphic" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  -0.2126 -0.7152 -0.0722 0 1" />
-          <feComposite in2="SourceAlpha" operator="in" />
-        </filter>
-      </defs>
-    </svg>
     <div class="site-header__top">
       <div class="site-header__top-inner">
         <div class="site-header__left">

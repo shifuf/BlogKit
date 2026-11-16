@@ -217,6 +217,7 @@
 
 <script setup>
 import { computed, onMounted, onUnmounted, nextTick, reactive, ref } from 'vue';
+import { brandLogo } from '@/utils/brand';
 import { message } from 'ant-design-vue';
 import { MdEditor } from 'md-editor-v3';
 import GalleryToolbar from '@/views/Article/components/GalleryToolbar.vue';
@@ -343,7 +344,7 @@ const onAvatarPreviewError = event => {
   const el = event?.target;
   if (!el || el.dataset.fallback === '1') return;
   el.dataset.fallback = '1';
-  el.src = `${import.meta.env.BASE_URL}logo.png`;
+  el.src = brandLogo;
 };
 
 const loadAppearance = async () => {
