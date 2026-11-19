@@ -10,8 +10,8 @@ async function unwrapMusicPayload(data) {
   return data;
 }
 
-export const searchMusic = async (keyword, source = 'play') => {
-  const data = await request.get('/music/search', { params: { keyword, source } });
+export const searchMusic = async keyword => {
+  const data = await request.get('/music/search', { params: { keyword } });
   return unwrapMusicPayload(data);
 };
 

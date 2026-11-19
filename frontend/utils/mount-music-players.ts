@@ -55,12 +55,10 @@ export async function mountMusicPlayers(root: ParentNode | null | undefined) {
     const name = attr(el, 'name') || '未命名音乐';
     const artist = attr(el, 'artist') || '未知歌手';
     const cover = attr(el, 'cover');
-    const source = attr(el, 'source') || 'play';
-
     const host = document.createElement('div');
     host.className = 'md-music-player md-music-player--loading';
     host.dataset.rid = rid;
-    host.dataset.source = source;
+    host.dataset.source = 'combined';
     host.innerHTML = loadingHtml();
     el.replaceWith(host);
 
@@ -70,7 +68,7 @@ export async function mountMusicPlayers(root: ParentNode | null | undefined) {
       if (!response.ok || !payload?.success) {
         throw new Error(payload?.message || '音乐加载失败');
       }
-      const track = await unwrapApiData<{ url?: string; lyric?: string; name?: string; artist?: string }>(payload);
+      const track = await unwrapApiData<{ url?: string; lyric?: string; name?: string; artist?: string; cover?: string; candidates?: Array<{ source: string; url: string; cover?: string; lyric?: string }> }>(payload);
       if (!track?.url) {
         throw new Error(payload?.message || '音乐加载失败');
       }
@@ -79,10 +77,11 @@ export async function mountMusicPlayers(root: ParentNode | null | undefined) {
       const player = createPlainMusicPlayer(host, {
         name: track.name || name,
         artist: track.artist || artist,
-        cover,
-        sourceType: source,
+        cover: track.cover || cover,
+        sourceType: 'combined',
         url: track.url,
-        lyric: track.lyric || ''
+        lyric: track.lyric || '',
+        candidates: track.candidates || []
       }, { autoplay: false, mutex: true });
       if (player) playerRegistry.set(host, player);
       host.classList.add('md-music-player--ready');

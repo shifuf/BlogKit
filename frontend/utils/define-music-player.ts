@@ -76,7 +76,7 @@ export function defineMusicPlayerElement() {
     private _loadedRid = '';
 
     static get observedAttributes() {
-      return ['rid', 'name', 'artist', 'cover', 'source'];
+      return ['rid', 'name', 'artist', 'cover'];
     }
 
     connectedCallback() {
@@ -130,7 +130,7 @@ export function defineMusicPlayerElement() {
         if (!response.ok || !payload?.success) {
           throw new Error(payload?.message || '音乐加载失败');
         }
-        const track = await unwrapApiData<{ url?: string; lyric?: string; name?: string; artist?: string }>(payload);
+        const track = await unwrapApiData<{ url?: string; lyric?: string; name?: string; artist?: string; cover?: string; candidates?: Array<{ source: string; url: string; cover?: string; lyric?: string }> }>(payload);
         if (!track?.url) {
           throw new Error(payload?.message || '音乐加载失败');
         }
@@ -146,10 +146,11 @@ export function defineMusicPlayerElement() {
         this._player = createPlainMusicPlayer(mount, {
           name,
           artist,
-          cover: this.getAttribute('cover') || '',
-          sourceType: this.getAttribute('source') || 'play',
+          cover: track.cover || this.getAttribute('cover') || '',
+          sourceType: 'combined',
           url: track.url,
-          lyric: track.lyric || ''
+          lyric: track.lyric || '',
+          candidates: track.candidates || []
         }, { autoplay: false, mutex: true });
         this._loadedRid = rid;
       } catch (error) {

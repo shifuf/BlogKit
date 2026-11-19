@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>博客音乐源测试页</title>
+  <style>
+    :root { color-scheme: light; font-family: Inter, "Microsoft YaHei", system-ui, sans-serif; color: #172033; background: #f4f7fb; }
+    * { box-sizing: border-box; }
+    body { max-width: 1120px; margin: 0 auto; padding: 28px 18px 48px; }
+    h1 { margin: 0 0 8px; font-size: clamp(24px, 4vw, 36px); letter-spacing: -.03em; }
+    h2 { margin: 0; font-size: 18px; }
+    p { margin: 0; color: #667085; line-height: 1.6; }
+    .intro { margin-bottom: 22px; }
+    .panel { margin: 14px 0; padding: 18px; border: 1px solid #e4e9f1; border-radius: 18px; background: #fff; box-shadow: 0 8px 30px rgba(30, 52, 87, .06); }
+    .config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin-top: 14px; }
+    label { display: grid; gap: 6px; color: #475467; font-size: 12px; font-weight: 700; }
+    input, button { font: inherit; }
+    input[type="text"], input[type="password"], input[type="number"] { width: 100%; min-height: 38px; padding: 8px 10px; border: 1px solid #d0d5dd; border-radius: 10px; color: #172033; background: #fff; }
+    .search-row { display: flex; gap: 10px; margin-top: 14px; }
+    .search-row input { flex: 1; }
+    button { min-height: 38px; padding: 8px 14px; border: 0; border-radius: 10px; color: #fff; background: #2563eb; cursor: pointer; font-weight: 700; }
+    button.secondary { color: #344054; background: #eef2f7; }
+    button:disabled { cursor: wait; opacity: .55; }
+    .toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+    .status { min-height: 24px; margin-top: 12px; color: #667085; font-size: 13px; }
+    .status.error { color: #b42318; }
+    .source-status { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 14px; }
+    .source-chip { padding: 10px 12px; border: 1px solid #e4e9f1; border-radius: 12px; background: #fbfcfe; font-size: 13px; }
+    .source-chip strong { display: block; margin-bottom: 4px; }
+    .source-chip[data-state="ok"] { border-color: #9fe5c1; background: #f0fdf4; }
+    .source-chip[data-state="error"] { border-color: #f3b4b4; background: #fff5f5; }
+    .results { display: grid; gap: 10px; margin-top: 14px; }
+    .result { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 12px; align-items: center; padding: 10px; border: 1px solid #e4e9f1; border-radius: 14px; background: #fff; }
+    .cover { width: 58px; height: 58px; overflow: hidden; display: grid; place-items: center; border-radius: 12px; color: #667085; background: #edf2f7; }
+    .cover img { width: 100%; height: 100%; object-fit: cover; }
+    .title { overflow: hidden; color: #172033; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+    .artist { margin-top: 3px; overflow: hidden; color: #667085; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+    .badges { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+    .badge { display: inline-flex; padding: 2px 7px; border-radius: 999px; color: #175cd3; background: #eff8ff; font-size: 11px; }
+    .badge.alt { color: #027a48; background: #ecfdf3; }
+    .player { display: grid; gap: 14px; }
+    .now-playing { display: grid; grid-template-columns: 90px minmax(0, 1fr); gap: 14px; align-items: center; }
+    .now-playing .cover { width: 90px; height: 90px; }
+    .now-playing h2 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .now-playing .artist { font-size: 14px; }
+    .times { display: flex; justify-content: space-between; color: #667085; font-size: 12px; font-variant-numeric: tabular-nums; }
+    input[type="range"] { width: 100%; accent-color: #2563eb; cursor: pointer; }
+    .lyric { max-height: 180px; overflow: auto; display: grid; gap: 4px; padding: 6px; border-radius: 12px; background: #f8fafc; }
+    .lyric-line { padding: 5px 8px; border-radius: 7px; color: #667085; cursor: pointer; font-size: 13px; }
+    .lyric-line:hover, .lyric-line.active { color: #1d4ed8; background: #eff6ff; font-weight: 700; }
+    .player-controls { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .player-controls button { min-width: 90px; }
+    .hint { padding: 28px 12px; color: #667085; text-align: center; }
+    code { padding: 2px 5px; border-radius: 5px; color: #344054; background: #f2f4f7; }
+    @media (max-width: 760px) {
+      .config-grid, .source-status { grid-template-columns: 1fr; }
+      .result { grid-template-columns: 48px minmax(0, 1fr); }
+      .result button { grid-column: 2; justify-self: start; }
+      .cover { width: 48px; height: 48px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="intro">
+    <h1>博客音乐源测试页</h1>
+    <p>先验证搜索、封面、播放、拖动进度和点击歌词跳转。页面会把同名歌曲的多个候选合并，当前候选播放失败时自动尝试下一个来源。</p>
+  </header>
+
+  <section class="panel">
+    <div class="toolbar">
+      <h2>接口配置</h2>
+      <button id="healthButton" class="secondary" type="button">检测接口</button>
+    </div>
+    <div class="config-grid">
+      <label>QQ API Key
+        <input id="qqKey" type="password" autocomplete="off">
+      </label>
+      <label>网易云 API Key
+        <input id="neteaseKey" type="password" autocomplete="off">
+      </label>
+      <label>每源结果数量（最多 20 首）
+        <input id="limit" type="number" value="5" min="1" max="10">
+      </label>
+    </div>
+    <div class="search-row">
+      <input id="keyword" type="text" value="稻香" placeholder="输入歌曲名或歌手名">
+      <button id="searchButton" type="button">搜索并合并</button>
+    </div>
+    <div id="status" class="status">API Key 仅用于本机测试代理请求，不会写入页面文件。首次搜索会验证各源，并延迟获取候选音频。</div>
+    <div id="sourceStatus" class="source-status" aria-live="polite"></div>
+  </section>
+
+  <section class="panel player" aria-label="播放器">
+    <div class="now-playing">
+      <div id="nowCover" class="cover">♪</div>
+      <div>
+        <h2 id="nowTitle">尚未播放</h2>
+        <div id="nowArtist" class="artist">选择搜索结果开始测试</div>
+      </div>
+    </div>
+    <div>
+      <input id="progress" type="range" min="0" max="0" step="0.01" value="0" disabled aria-label="播放进度">
+      <div class="times"><span id="currentTime">00:00</span><span id="duration">00:00</span></div>
+    </div>
+    <div class="player-controls">
+      <button id="playButton" type="button" disabled>播放</button>
+      <button id="backButton" class="secondary" type="button" disabled>后退 10 秒</button>
+      <button id="forwardButton" class="secondary" type="button" disabled>前进 10 秒</button>
+      <span id="playStatus" class="status" aria-live="polite"></span>
+    </div>
+    <div id="lyrics" class="lyric"><div class="hint">暂无歌词</div></div>
+  </section>
+
+  <section class="panel">
+    <h2>合并结果</h2>
+    <div id="results" class="results"><div class="hint">输入关键词后点击搜索。</div></div>
+  </section>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const state = { items: [], groups: [], audio: null, candidateIndex: -1, lines: [], currentGroup: null, requestId: 0, playAttempt: 0, resolved: new WeakMap() };
+    const sourceLabels = { qq: 'QQ', netease: '网易云', mitu: '米兔' };
+
+    function text(value) { return String(value == null ? '' : value).trim(); }
+    function first(...values) { return values.map(text).find(Boolean) || ''; }
+    function formatTime(value) {
+      const seconds = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+      return String(Math.floor(seconds / 60)).padStart(2, '0') + ':' + String(seconds % 60).padStart(2, '0');
+    }
+    function artistOf(value) {
+      if (Array.isArray(value)) return value.map((item) => typeof item === 'string' ? item : first(item?.name, item?.artist)).filter(Boolean).join(' / ');
+      return text(value);
+    }
+    function coverOf(item) {
+      const cover = item?.cover;
+      if (typeof cover === 'string') return cover;
+      return first(cover?.url, cover?.large, cover?.medium, cover?.small, cover?.picUrl, item?.pic, item?.album?.picUrl, item?.album?.pic);
+    }
+    function lyricOf(value) {
+      if (typeof value === 'string') return value;
+      return first(value?.text, value?.lyric, value?.lrc);
+    }
+    function toItems(payload, source, keyword) {
+      const values = Array.isArray(payload?.list) ? payload.list : [];
+      return values.map((raw, index) => {
+        const item = {
+          source,
+          sourceLabel: sourceLabels[source],
+          id: first(raw.rid, raw.songmid, raw.musicrid, raw.id, `${source}-${index}`),
+          index: index + 1,
+          keyword,
+          name: first(raw.name, raw.songname, raw.SONGNAME, raw.title, '未命名音乐'),
+          artist: first(artistOf(raw.artists), raw.artist, raw.ARTIST, raw.singer, '未知歌手'),
+          cover: coverOf(raw),
+          url: '',
+          lyric: '',
+          duration: Number(raw.duration || raw.dt || 0)
+        };
+        return item;
+      }).filter((item) => item.id && item.name);
+    }
+    function dedupe(items) {
+      const seen = new Set();
+      return items.filter((item) => {
+        const key = `${item.source}:${item.id || item.name + '|' + item.artist}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+    }
+    function groupItems(items) {
+      const map = new Map();
+      items.forEach((item) => {
+        const key = `${item.name.toLocaleLowerCase()}|${item.artist.toLocaleLowerCase()}`;
+        const group = map.get(key) || { key, name: item.name, artist: item.artist, cover: item.cover, lyric: item.lyric, candidates: [] };
+        if (!group.cover && item.cover) group.cover = item.cover;
+        if (!group.lyric && item.lyric) group.lyric = item.lyric;
+        group.candidates.push(item);
+        map.set(key, group);
+      });
+      return [...map.values()];
+    }
+    function setStatus(message, error = false) {
+      $('status').textContent = message;
+      $('status').classList.toggle('error', error);
+    }
+    function setSourceStatus(source, message, stateName = '') {
+      const el = document.querySelector(`[data-source-status="${source}"]`);
+      if (!el) return;
+      el.dataset.state = stateName;
+      el.querySelector('.source-detail').textContent = message;
+    }
+    function renderSourceStatus() {
+      $('sourceStatus').innerHTML = Object.entries(sourceLabels).map(([key, label]) => `<div class="source-chip" data-source-status="${key}"><strong>${label}</strong><span class="source-detail">未检测</span></div>`).join('');
+    }
+    function escapeHtml(value) {
+      return text(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
+    }
+    function renderCover(url, className = 'cover') {
+      return url ? `<div class="${className}"><img src="${escapeHtml(url)}" alt="" referrerpolicy="no-referrer"><span hidden>♪</span></div>` : `<div class="${className}">♪</div>`;
+    }
+    function renderResults() {
+      if (!state.groups.length) {
+        $('results').innerHTML = '<div class="hint">没有可播放的结果。</div>';
+        return;
+      }
+      $('results').innerHTML = state.groups.map((group, index) => `<article class="result">
+        ${renderCover(group.cover)}
+        <div><div class="title">${escapeHtml(group.name)}</div><div class="artist">${escapeHtml(group.artist)}</div>
+          <div class="badges">${group.candidates.map((item) => `<span class="badge${item.source === 'mitu' ? ' alt' : ''}">${sourceLabels[item.source]}${item.cover ? ' · 有封面' : ''}</span>`).join('')}</div>
+        </div>
+        <button type="button" data-play-group="${index}">播放 / 检测</button>
+      </article>`).join('');
+      $('results').querySelectorAll('[data-play-group]').forEach((button) => button.addEventListener('click', () => playGroup(state.groups[Number(button.dataset.playGroup)])));
+    }
+    function parseLyrics(value) {
+      const lines = [];
+      const pattern = /\[(\d{1,2}):(\d{1,2})(?:[.:](\d{1,3}))?]/g;
+      text(value).split(/\r?\n/).forEach((line) => {
+        const matches = [...line.matchAll(pattern)];
+        const lyric = line.replace(pattern, '').trim();
+        if (!lyric || !matches.length) return;
+        matches.forEach((match) => lines.push({ time: Number(match[1]) * 60 + Number(match[2]) + Number(`0.${String(match[3] || '').padEnd(3, '0').slice(0, 3)}`), text: lyric }));
+      });
+      return lines.sort((a, b) => a.time - b.time);
+    }
+    function renderLyrics(group) {
+      state.lines = parseLyrics(group?.lyric || '');
+      $('lyrics').innerHTML = state.lines.length ? state.lines.map((line, index) => `<div class="lyric-line" data-lyric="${index}" data-time="${line.time}">${escapeHtml(line.text)}</div>`).join('') : '<div class="hint">暂无带时间戳的歌词</div>';
+      $('lyrics').querySelectorAll('[data-lyric]').forEach((line) => line.addEventListener('click', () => {
+        if (!state.audio) return;
+        const target = state.lines[Number(line.dataset.lyric)];
+        if (!target || !Number.isFinite(state.audio.duration)) return;
+        state.audio.currentTime = Math.min(target.time, state.audio.duration || target.time);
+        state.audio.play().catch(() => {});
+      }));
+    }
+    function updateLyrics() {
+      const current = state.audio?.currentTime || 0;
+      let active = -1;
+      state.lines.forEach((line, index) => { if (line.time <= current + .12) active = index; });
+      $('lyrics').querySelectorAll('[data-lyric]').forEach((line, index) => line.classList.toggle('active', index === active));
+    }
+    function destroyAudio() {
+      if (!state.audio) return;
+      state.audio.pause();
+      state.audio.src = '';
+      state.audio = null;
+      $('playButton').disabled = true;
+      $('progress').disabled = true;
+      $('backButton').disabled = true;
+      $('forwardButton').disabled = true;
+    }
+    function updatePlayer() {
+      const audio = state.audio;
+      const duration = Number.isFinite(audio?.duration) ? audio.duration : 0;
+      $('currentTime').textContent = formatTime(audio?.currentTime || 0);
+      $('duration').textContent = formatTime(duration);
+      $('progress').max = String(duration || 0);
+      $('progress').value = String(Math.min(audio?.currentTime || 0, duration || 0));
+      $('progress').disabled = !duration;
+      $('playButton').textContent = audio && !audio.paused ? '暂停' : '播放';
+      updateLyrics();
+    }
+    function tryCandidate(group, startIndex) {
+      if (!group || startIndex >= group.candidates.length) {
+        $('playStatus').textContent = '所有候选源都无法播放';
+        return;
+      }
+      const candidate = group.candidates[startIndex];
+      const attempt = ++state.playAttempt;
+      destroyAudio();
+      state.currentGroup = group;
+      state.candidateIndex = startIndex;
+      renderLyrics({ ...group, lyric: candidate.lyric || group.lyric || '' });
+      $('nowTitle').textContent = group.name;
+      $('nowArtist').textContent = `${group.artist} · 当前源：${sourceLabels[candidate.source]}`;
+      if (group.cover) $('nowCover').innerHTML = `<img src="${escapeHtml(group.cover)}" alt="" referrerpolicy="no-referrer">`;
+      else $('nowCover').textContent = '♪';
+      $('playStatus').textContent = `正在获取 ${sourceLabels[candidate.source]} 音频地址…`;
+      resolveCandidate(candidate).then((track) => {
+        if (attempt !== state.playAttempt) return;
+        candidate.lyric = lyricOf(track.lyric);
+        candidate.cover = candidate.cover || coverOf(track);
+        if (candidate.cover) $('nowCover').innerHTML = `<img src="${escapeHtml(candidate.cover)}" alt="" referrerpolicy="no-referrer">`;
+        if (candidate.lyric) renderLyrics({ ...group, lyric: candidate.lyric });
+        const audio = new Audio();
+        audio.preload = 'metadata';
+        audio.src = track.url;
+        state.audio = audio;
+        $('playButton').disabled = false;
+        $('backButton').disabled = false;
+        $('forwardButton').disabled = false;
+        $('playStatus').textContent = `正在检测 ${sourceLabels[candidate.source]} 音频…`;
+        let failureTimer = setTimeout(() => failCandidate(group, startIndex, audio, attempt, '载入超时'), 12000);
+        const ready = () => {
+          clearTimeout(failureTimer);
+          if (state.audio !== audio || attempt !== state.playAttempt) return;
+          setSourceStatus(candidate.source, `音频可载入 · ${formatTime(audio.duration)}`, 'ok');
+          $('playStatus').textContent = `已载入 ${sourceLabels[candidate.source]}，点击播放后可测试快进和歌词跳转`;
+          updatePlayer();
+          audio.play().then(() => {
+            $('playStatus').textContent = `正在播放 · ${sourceLabels[candidate.source]}`;
+          }).catch(() => {
+            if (state.audio === audio) $('playStatus').textContent = '浏览器需要点击“播放”开始音频';
+          });
+        };
+        audio.addEventListener('loadedmetadata', ready, { once: true });
+        audio.addEventListener('timeupdate', updatePlayer);
+        audio.addEventListener('play', updatePlayer);
+        audio.addEventListener('playing', () => {
+          setSourceStatus(candidate.source, `正在播放 · ${formatTime(audio.duration)}`, 'ok');
+          const startedAt = audio.currentTime;
+          setTimeout(() => {
+            if (state.audio === audio && attempt === state.playAttempt && !audio.paused && audio.currentTime - startedAt < .35) {
+              failCandidate(group, startIndex, audio, attempt, '播放无进度，尝试下一源');
+            }
+          }, 5000);
+        });
+        audio.addEventListener('pause', updatePlayer);
+        audio.addEventListener('ended', updatePlayer);
+        audio.addEventListener('error', () => failCandidate(group, startIndex, audio, attempt, '音频加载失败'));
+        audio.addEventListener('stalled', () => {
+          if (audio.readyState < 2) failureTimer = setTimeout(() => failCandidate(group, startIndex, audio, attempt, '音频响应中断'), 5000);
+        });
+        audio.load();
+      }).catch((error) => {
+        if (attempt !== state.playAttempt) return;
+        setSourceStatus(candidate.source, error?.message || '获取播放地址失败', 'error');
+        tryCandidate(group, startIndex + 1);
+      });
+    }
+    function failCandidate(group, index, audio, attempt, reason) {
+      if (state.audio !== audio || attempt !== state.playAttempt) return;
+      setSourceStatus(group.candidates[index].source, reason, 'error');
+      tryCandidate(group, index + 1);
+    }
+    async function resolveCandidate(item) {
+      if (state.resolved.has(item)) return state.resolved.get(item);
+      const key = item.source === 'qq' ? $('qqKey').value : item.source === 'netease' ? $('neteaseKey').value : '';
+      const track = await fetchJson('/api/resolve', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source: item.source, id: item.id, index: item.index, keyword: item.keyword, limit: state.searchLimit, key })
+      });
+      if (!track.url) throw new Error('该源没有可播放的音频地址');
+      state.resolved.set(item, track);
+      return track;
+    }
+    function playGroup(group) { tryCandidate(group, 0); }
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, options);
+      const body = await response.text();
+      let payload;
+      try { payload = JSON.parse(body); } catch { throw new Error(`HTTP ${response.status} 返回非 JSON`); }
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      if (payload?.error) throw new Error(String(payload.error));
+      return payload;
+    }
+    async function searchSource(source, keyword, limit) {
+      const key = source === 'qq' ? $('qqKey').value : source === 'netease' ? $('neteaseKey').value : '';
+      const payload = await fetchJson('/api/search', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ source, keyword, limit, key })
+      });
+      return dedupe(toItems(payload, source, keyword));
+    }
+    async function searchAll() {
+      const keyword = text($('keyword').value);
+      if (!keyword) return setStatus('请输入歌曲名或歌手名', true);
+      const requestId = ++state.requestId;
+      const limit = Math.max(1, Math.min(10, Number($('limit').value) || 5));
+      state.searchLimit = limit;
+      $('searchButton').disabled = true;
+      setStatus('正在请求三个音乐源并合并结果…');
+      renderSourceStatus();
+      const jobs = {
+        qq: searchSource('qq', keyword, limit),
+        netease: searchSource('netease', keyword, limit),
+        mitu: searchSource('mitu', keyword, limit)
+      };
+      const entries = await Promise.all(Object.entries(jobs).map(async ([source, job]) => {
+        try {
+          const items = await job;
+          setSourceStatus(source, `搜索正常 · ${items.length} 条`, 'ok');
+          return items;
+        } catch (error) {
+          setSourceStatus(source, error?.message || '请求失败', 'error');
+          return [];
+        }
+      }));
+      if (requestId !== state.requestId) return;
+      state.items = entries.flat();
+      state.groups = groupItems(state.items);
+      renderResults();
+      setStatus(`已合并 ${state.items.length} 条结果，得到 ${state.groups.length} 首歌曲。点“播放 / 检测”会验证真实音频；音频失败时自动尝试同组下一个源。`);
+      $('searchButton').disabled = false;
+    }
+    async function healthCheck() {
+      $('healthButton').disabled = true;
+      setStatus('正在检测接口…');
+      renderSourceStatus();
+      const keyword = text($('keyword').value) || '稻香';
+      const limit = 1;
+      state.searchLimit = limit;
+      await Promise.all(['qq', 'netease', 'mitu'].map(async (source) => {
+        try {
+          const items = await searchSource(source, keyword, limit);
+          if (!items.length) throw new Error('接口无搜索结果');
+          const group = { name: items[0].name, artist: items[0].artist, cover: items[0].cover, lyric: '', candidates: [items[0]] };
+          const track = await resolveCandidate(items[0]);
+          const probe = new Audio();
+          probe.preload = 'metadata';
+          probe.src = track.url;
+          await new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error('音频检测超时')), 10000);
+            probe.addEventListener('loadedmetadata', () => { clearTimeout(timer); resolve(); }, { once: true });
+            probe.addEventListener('error', () => { clearTimeout(timer); reject(new Error('音频无法加载')); }, { once: true });
+            probe.load();
+          });
+          setSourceStatus(source, `音频可载入 · ${formatTime(probe.duration)}`, 'ok');
+          probe.src = '';
+        } catch (error) { setSourceStatus(source, error?.message || '不可访问', 'error'); }
+      }));
+      setStatus('检测完成：显示为“音频可载入”才代表播放地址和媒体元数据均有效。');
+      $('healthButton').disabled = false;
+    }
+    $('searchButton').addEventListener('click', searchAll);
+    $('healthButton').addEventListener('click', healthCheck);
+    $('keyword').addEventListener('keydown', (event) => { if (event.key === 'Enter') searchAll(); });
+    $('playButton').addEventListener('click', () => { if (!state.audio) return; if (state.audio.paused) state.audio.play().then(() => { $('playStatus').textContent = `正在播放 · ${sourceLabels[state.currentGroup.candidates[state.candidateIndex].source]}`; }).catch(() => { $('playStatus').textContent = '浏览器未能开始播放'; }); else state.audio.pause(); });
+    $('backButton').addEventListener('click', () => { if (state.audio) state.audio.currentTime = Math.max(0, state.audio.currentTime - 10); });
+    $('forwardButton').addEventListener('click', () => { if (state.audio) state.audio.currentTime = Math.min(state.audio.duration || 0, state.audio.currentTime + 10); });
+    $('progress').addEventListener('input', () => { if (state.audio && Number.isFinite(state.audio.duration)) state.audio.currentTime = Number($('progress').value); });
+    renderSourceStatus();
+    fetch('/api/config').then((response) => response.json()).then((config) => {
+      if (config.qq) $('qqKey').placeholder = '已由本机测试服务器安全配置';
+      if (config.netease) $('neteaseKey').placeholder = '已由本机测试服务器安全配置';
+    }).catch(() => {});
+  </script>
+</body>
+</html>

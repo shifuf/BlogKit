@@ -120,10 +120,12 @@ blog:
     api-key: ${BLOG_NOTIFY_API_KEY:}
     timeout-seconds: ${BLOG_NOTIFY_TIMEOUT_SECONDS:10}
   music:
-    # 音乐组件的搜索/播放解析接口；由后端代理，避免浏览器直接依赖第三方搜索接口。
+    # 统一搜索 QQ、网易云和米兔；解析、封面、音频 Range 均经后端代理。
     api-base: ${BLOG_MUSIC_API_BASE:https://cyapi.top/API/qq_music.php}
     api-key: ${BLOG_MUSIC_API_KEY:}
-    resource-api-base: ${BLOG_MUSIC_RESOURCE_API_BASE:https://www.qqmp3.vip/api}
+    netease-api-base: ${BLOG_MUSIC_NETEASE_API_BASE:https://cyapi.top/API/netease.php}
+    netease-api-key: ${BLOG_MUSIC_NETEASE_API_KEY:}
+    mitu-api-base: ${BLOG_MUSIC_MITU_API_BASE:https://www.qqmp3.vip/api}
   health:
     # 站点体检探测 /feed.xml、/sitemap.xml 用的地址。后端与前端是独立容器，
     # 后端内 localhost 没有前端服务，需用 compose 网络内的服务名 frontend:3256。

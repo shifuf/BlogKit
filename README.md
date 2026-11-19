@@ -151,6 +151,7 @@ cd backend
 | `WECHAT_MINI_PROGRAM_*` | 小程序登录 |
 | `SENIVERSE_WIDGET_TOKEN` | 天气 |
 | `BLOG_MUSIC_API_KEY` | 音乐搜索 |
+| `BLOG_MUSIC_NETEASE_API_KEY` | 音乐播放器的网易云备用源（可选） |
 | 后台「上传设置」 | 图床 / 文件管理 |
 | 后台「OAuth 配置」 | OAuth2 登录 |
 

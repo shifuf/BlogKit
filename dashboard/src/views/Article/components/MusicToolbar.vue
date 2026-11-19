@@ -24,27 +24,6 @@
         </div>
 
         <div class="music-modal-search">
-          <div class="source-switch" role="tablist" aria-label="音乐来源">
-            <button
-              type="button"
-              role="tab"
-              :class="{ active: source === 'play' }"
-              :aria-selected="source === 'play'"
-              @click="switchSource('play')"
-            >
-              播放源
-            </button>
-            <button
-              type="button"
-              role="tab"
-              :class="{ active: source === 'resource' }"
-              :aria-selected="source === 'resource'"
-              @click="switchSource('resource')"
-            >
-              资源源
-            </button>
-          </div>
-
           <div class="search-field">
             <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="7"></circle>
@@ -61,19 +40,19 @@
               <span v-else>搜索</span>
             </button>
           </div>
-          <div class="music-help">接口由博客后端代理；正文只保存资源 ID / 歌名 / 歌手 / 封面，不存临时播放地址。</div>
+          <div class="music-help">搜索结果已合并。播放失败时会自动切换到同名、同歌手的备用源；文章只保存曲目 ID 与封面。</div>
         </div>
 
         <div class="music-modal-body">
           <div v-if="loading" class="music-hint">
             <div class="hint-loader"><span></span><span></span><span></span></div>
             <div class="hint-title">正在搜索</div>
-            <div class="hint-desc">正在从{{ source === 'play' ? '播放源' : '资源源' }}拉取结果…</div>
+            <div class="hint-desc">正在检查 QQ、网易云和米兔音乐…</div>
           </div>
           <div v-else-if="list.length === 0 && searched" class="music-hint">
             <div class="hint-icon">♪</div>
             <div class="hint-title">未找到结果</div>
-            <div class="hint-desc">试试换个关键词，或切换音乐来源</div>
+            <div class="hint-desc">换个关键词再试一次</div>
           </div>
           <div v-else-if="list.length === 0" class="music-hint">
             <div class="hint-icon">♫</div>
@@ -100,7 +79,7 @@
               <div class="music-name">{{ item.name }}</div>
               <div class="music-artist">
                 <span class="artist-text">{{ item.artist || '未知歌手' }}</span>
-                <span class="source-badge" :data-source="item.source || source">{{ item.sourceName || sourceLabel }}</span>
+                <span class="source-badge">自动切换</span>
               </div>
             </div>
             <button
@@ -158,7 +137,6 @@ const emit = defineEmits(['insert']);
 
 const visible = ref(false);
 const keyword = ref('');
-const source = ref('play');
 const loading = ref(false);
 const searched = ref(false);
 const list = ref([]);
@@ -173,7 +151,6 @@ let previewPlayer = null;
 const trackCache = new Map();
 
 const selected = computed(() => (selectedIndex.value >= 0 ? list.value[selectedIndex.value] : null));
-const sourceLabel = computed(() => (source.value === 'resource' ? '资源源' : '播放源'));
 
 const escapeAttr = value => String(value || '')
   .replace(/&/g, '&amp;')
@@ -196,21 +173,6 @@ const stopPreview = () => {
   }
 };
 
-const resetResults = () => {
-  list.value = [];
-  selectedIndex.value = -1;
-  previewError.value = '';
-  searched.value = false;
-  trackCache.clear();
-  stopPreview();
-};
-
-const switchSource = next => {
-  if (source.value === next) return;
-  source.value = next;
-  resetResults();
-};
-
 const close = () => {
   stopPreview();
   visible.value = false;
@@ -226,7 +188,7 @@ const doSearch = async () => {
   trackCache.clear();
   stopPreview();
   try {
-    list.value = (await searchMusic(q, source.value)) || [];
+    list.value = (await searchMusic(q)) || [];
   } catch (error) {
     list.value = [];
     message.error(error?.message || '搜索失败');
@@ -249,9 +211,10 @@ const resolveTrack = async item => {
     name: item.name || '未命名音乐',
     artist: item.artist || '未知歌手',
     cover: item.cover || '',
-    sourceType: item.source || source.value,
+    sourceType: 'combined',
     url: data.url,
-    lyric: data.lyric || ''
+    lyric: data.lyric || '',
+    candidates: Array.isArray(data.candidates) ? data.candidates : []
   };
   trackCache.set(item.rid, track);
   return track;
@@ -294,7 +257,6 @@ const insert = () => {
   const item = selected.value;
   if (!item?.rid) return;
   const attrs = [
-    ['source', item.source || source.value],
     ['rid', item.rid],
     ['name', item.name || ''],
     ['artist', item.artist || ''],
@@ -396,29 +358,6 @@ onBeforeUnmount(() => stopPreview());
   background: #fafafa;
 }
 .music-help { color: #8c8c8c; font-size: 12px; }
-.source-switch {
-  display: inline-flex;
-  padding: 3px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  gap: 2px;
-}
-.source-switch button {
-  min-width: 88px;
-  height: 32px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: #6b7280;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.source-switch button.active[aria-selected='true'] {
-  color: #1677ff;
-  background: #e6f4ff;
-}
 .search-field {
   display: flex;
   align-items: center;
@@ -600,16 +539,6 @@ onBeforeUnmount(() => stopPreview());
   color: #8c8c8c;
   font-size: 10px;
   font-weight: 700;
-}
-.source-badge[data-source='play'] {
-  border-color: #91caff;
-  background: #e6f4ff;
-  color: #1677ff;
-}
-.source-badge[data-source='resource'] {
-  border-color: #87e8de;
-  background: #e6fffb;
-  color: #13c2c2;
 }
 .preview-btn {
   width: 36px;

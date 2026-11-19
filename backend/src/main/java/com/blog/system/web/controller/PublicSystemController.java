@@ -200,7 +200,6 @@ public class PublicSystemController {
     @GetMapping("/music/search")
     public ApiResponse<List<MusicService.MusicSearchItem>> searchMusic(
             @RequestParam String keyword,
-            @RequestParam(defaultValue = "play") String source,
             HttpServletRequest request
     ) {
         String ip = clientIpResolver.resolve(request);
@@ -209,7 +208,7 @@ public class PublicSystemController {
         }
         // 明文返回：管理端常以 http://IP 访问，非安全上下文无 crypto.subtle，无法解 AES 密封。
         // 搜索结果本身不含可直连播放地址（rid 已编码），无需额外混淆。
-        return ApiResponse.ok(musicService.search(keyword, source));
+        return ApiResponse.ok(musicService.search(keyword));
     }
 
     @GetMapping("/music/resolve")
@@ -256,5 +255,21 @@ public class PublicSystemController {
             in.transferTo(out);
             out.flush();
         }
+    }
+
+    @GetMapping("/music/cover")
+    public void musicCover(@RequestParam String token,
+                           HttpServletRequest request,
+                           jakarta.servlet.http.HttpServletResponse response) throws java.io.IOException {
+        String ip = clientIpResolver.resolve(request);
+        if (!rateLimiter.tryAcquire("music-cover:" + ip, 180, 60_000)) {
+            throw new BusinessException("音乐封面请求太频繁，请稍后再试");
+        }
+        MusicService.ImageResult image = musicService.openCover(token);
+        response.setStatus(200);
+        response.setHeader("Content-Type", image.contentType());
+        response.setHeader("Cache-Control", "private, max-age=3600");
+        response.setContentLength(image.body().length);
+        response.getOutputStream().write(image.body());
     }
 }
