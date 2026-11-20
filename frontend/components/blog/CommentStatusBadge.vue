@@ -25,6 +25,6 @@ const label = computed(() => approved.value ? '已通过'
   white-space: normal;
 }
 .comment-status-badge--approved { color: #276447; background: #edf7ef; border-color: #9fc7ab; }
-:global(html[data-theme='dark']) .comment-status-badge { color: #f3c77d; background: #352b19; border-color: #776238; }
-:global(html[data-theme='dark']) .comment-status-badge--approved { color: #98d9b1; background: #1d3329; border-color: #406b54; }
+:global(html[data-theme='dark'] .comment-status-badge) { color: #f3c77d; background: #352b19; border-color: #776238; }
+:global(html[data-theme='dark'] .comment-status-badge--approved) { color: #98d9b1; background: #1d3329; border-color: #406b54; }
 </style>
