@@ -23,7 +23,7 @@ public class CommentAiReviewer {
                     拒绝垃圾广告、诈骗、恶意辱骂、骚扰、仇恨、色情和明显违法内容。
                     仅输出一个 JSON 对象，且只有 approved 一个布尔字段：
                     {"approved":true} 或 {"approved":false}。不输出解释、Markdown 或其他字段。
-                    """, content, 48);
+                    """, content, 512);
             var result = strict.readTree(output);
             if (result == null || !result.isObject() || result.size() != 1
                     || !result.has("approved") || !result.get("approved").isBoolean()) return null;

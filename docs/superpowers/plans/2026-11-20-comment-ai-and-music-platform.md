@@ -68,8 +68,12 @@
 
 ## Integrated verification
 
-- Backend: 156 tests passed, zero failures/errors/skips, using isolated PostgreSQL17 for migrations, SQL jobs and JPA publication.
+- Backend: 157 tests passed, zero failures/errors/skips, using isolated PostgreSQL17 for migrations, SQL jobs and JPA publication.
 - Frontend: 78 tests, lint (100 Vue components), typecheck and final Nuxt production build passed.
 - Dashboard: 49 tests, lint, typecheck and Vite production build passed.
 - Independent review reported four Important findings. Regressions first reproduced stale reply cursors, lost private preview replies, concurrent identity initialization and precommit email delivery; all now pass after coordinated refresh, browser bootstrap/Web Locks and after-commit idempotent email changes. No additional review pass requested.
 - Production encrypted backup prepared at `/www/wwwroot/blog/backups/physical/backup-20261120T155217Z`; local-only (`offsiteVerified=false`). Disposable test PostgreSQL stopped and tunnel closed before production build.
+
+### Production reasoning-model adjustment
+
+The live configured model sometimes consumed the original 48-token cap in reasoning (`finish_reason=length`, no final content). A metadata-only probe confirmed strict JSON at128 tokens. The moderation call now reserves at most512 tokens while retaining strict boolean parsing and bounded retries. A new regression reproduced the empty-content behavior before the fix; full157-test real-PostgreSQL verification and package passed afterward. No AI setting, provider, key or model was changed.

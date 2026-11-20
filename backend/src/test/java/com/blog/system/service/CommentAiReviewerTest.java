@@ -31,4 +31,11 @@ class CommentAiReviewerTest {
         when(ai.chat(anyString(), anyString(), anyInt())).thenThrow(new RuntimeException("external failure"));
         assertNull(reviewer.review("hello"));
     }
+    @Test void reasoningModelsHaveEnoughBudgetToReturnTheStrictDecisionAfterReasoning() {
+        when(ai.isConfigured()).thenReturn(true);
+        when(ai.chat(anyString(), anyString(), anyInt())).thenAnswer(call ->
+                ((Integer) call.getArgument(2)) < 128 ? "" : "{\"approved\":true}");
+        assertEquals(Boolean.TRUE, reviewer.review("Helpful reply"));
+        verify(ai).chat(anyString(), eq("Helpful reply"), org.mockito.ArgumentMatchers.intThat(budget -> budget >= 128 && budget <= 512));
+    }
 }
