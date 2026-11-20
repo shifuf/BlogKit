@@ -15,6 +15,9 @@ pic
 frontend-build.log
 miniprogram
 /.runtime
+/.codex-backup
+/.codex-release
+/secrets
 /backups
 /tests
 /docs

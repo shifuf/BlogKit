@@ -175,7 +175,7 @@ const isDrawerActive = (item: NavItem): boolean => {
   if (item.to === '/') return route.path === '/' || route.path === '/index';
   return route.path === item.to;
 };
-const drawerHero = computed(() => siteSettings.value.homeHeroImageUrl || '');
+const drawerHero = computed(() => siteSettings.value.homeHeroImageUrl || drawerAvatar.value || '');
 const submitSearch = async () => {
   const q = keyword.value.trim();
   if (!q) return;

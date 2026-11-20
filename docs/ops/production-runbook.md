@@ -6,7 +6,7 @@ Only `/www/wwwroot/blog` is a deployment/backup write target. Never operate othe
 
 Defaults: postgres256MiB (shared_buffers64MiB/work_mem2MiB/35connections), Redis96MiB (maxmemory48MiB/noeviction/AOF), backend512MiB (heap256MiB/metaspace128MiB, pool4), frontend256MiB (Node heap160MiB). Total limits1120MiB, excluding build/restore drill and other services. These are budgets, not measured concurrency guarantees; host has3.65GB RAM with about2.35GB used plus2GB swap. Observe actual RSS/OOM/Redis used memory and connection waits. Redis noeviction avoids silently deleting authentication/rate-limit data; rejected writes under budget exhaustion are a failure needing investigation, not a successful login/cache update. New Redis password is independently generated and provided in protected temporary config; no host port. Backend/frontend nonroot, readonly root, tmpfs, no capabilities. PostgreSQL retains default seccomp/AppArmor; compatibility exceptions must be scoped/justified separately.
 
-Do not build Nuxt/Maven simultaneously on the constrained server. Prefer local/CI-built images and `docker save`/`docker load` artifact staged only under project directory. Inspect image digests and scan reports; floating major security tags in defaults must be pinned to deployed tested digests by operator for traceability. CI builds tests/typecheck/lint/npm and Maven dependency scans plus HIGH/CRITICAL image scan. CI has not been run merely by adding workflow.
+Do not build Nuxt/Maven simultaneously on the constrained server. Prefer local/CI-built images and `docker save`/`docker load` artifacts staged only under the project directory, using the same production build configuration. The frontend build includes API-path configuration: a local Nuxt output built with different configuration cannot be substituted for the production output. When a matching frontend artifact is unavailable, serialize `docker compose build frontend` on the server and verify its exit status before replacing the frontend. Inspect image digests and scan reports; floating major security tags in defaults must be pinned to deployed tested digests by operator for traceability. CI builds tests/typecheck/lint/npm and Maven dependency scans plus HIGH/CRITICAL image scan. CI has not been run merely by adding workflow.
 
 ## Initial upgrade and roles
 
@@ -42,7 +42,7 @@ The regular backend continues to run as uid10001 with all capabilities dropped. 
 
 ## Flyway existing history — preserve exact bytes
 
-The pre-upgrade live database had a V1 baseline and executed V2..V12 historical migration scripts. Exact original V2..V12 bytes were recovered, and this remediation uses V13..V17. The deployed application is at V17; the isolated PostgreSQL upgrade check validated 18 Flyway entries without repair or history rewriting. Verify deployed scripts match database checksums and descriptions before every future startup. Never update/delete `flyway_schema_history`, call `repair` to silence mismatch, disable validation, or baseline an already managed database. `SPRING_FLYWAY_BASELINE_ON_MIGRATE=false`; only fresh schema applies V1. A V12 upgrade clone does not prove a completely empty database installation; validate that path separately before using it. On mismatch leave application stopped and reconcile exact artifacts with evidence. Restore drill preserves history records from pg_dump and is isolated.
+The pre-upgrade live database had a V1 baseline and executed V2..V12 historical migration scripts. Exact original V2..V12 bytes were recovered, and the earlier remediation used V13..V17. The 2026-11-20 application rollout added V18 to clear historical protected-article search summaries; production validated 19 Flyway entries and applied V18 without repair or history rewriting. Verify deployed scripts match database checksums and descriptions before every future startup. Never update/delete `flyway_schema_history`, call `repair` to silence mismatch, disable validation, or baseline an already managed database. `SPRING_FLYWAY_BASELINE_ON_MIGRATE=false`; only fresh schema applies V1. A V12 upgrade clone does not prove a completely empty database installation; validate that path separately before using it. On mismatch leave application stopped and reconcile exact artifacts with evidence. Restore drill preserves history records from pg_dump and is isolated.
 
 ## Deployment
 
@@ -60,6 +60,20 @@ docker compose ps
 Do not use `down -v`. Changing PostgreSQL DB_ADMIN env or Redis password requires careful recreation/config rollout; DB_ADMIN existing password remains actual. Validate runtime app user cannot CREATE/ALTER while Flyway/BackupDS do their authorized operations. Inspect failed transaction rollback logs privately.
 
 The 2026-11-17 production rollout completed role configuration and healthy application startup. Production smoke verified ordinary administrator login, independent Redis session, Java-to-UFM HMAC connection, encrypted application backup, and an isolated schema restore drill using the dedicated backup role. The earlier rollback-only SQL permission probe did not execute psql meta-command behavior and therefore did not prove the original script ran unchanged. Deployment exposed the zero-row `\gset` validation failure; the script now always returns one boolean `invalid_roles` row, and the corrected script subsequently executed successfully in production.
+
+## Public music Range verification
+
+The 2026-11-20 deployment isolated a proxy issue outside the application: direct backend and Nuxt requests with `Range: bytes=0-1023` return 206 and a matching `Content-Range`, but the public nginx returns 200. `/www/server/nginx/conf/proxy.conf` enables `proxy_cache cache_one` globally, and both blog proxy locations inherit it. With proxy caching enabled, nginx removes the client Range header when forming the upstream request. A `no-store` response from the application arrives after that request has already lost its Range header.
+
+An isolated loopback nginx experiment using the installed binary reproduced the 200 response with inherited cache and returned 206 for the same track with `proxy_cache off;`. All experiment configuration, logs, cache and temporary paths were inside `/www/wwwroot/blog/.codex-release/a4f9f4b/range-cache-check/`; its process was stopped afterward.
+
+The proposed fix adds the following directive immediately after the existing `proxy_pass http://127.0.0.1:3256;` in each of the two blog proxy locations:
+
+```nginx
+proxy_cache off;
+```
+
+The original site configuration, candidate and exact patch are staged under `/www/wwwroot/blog/.codex-release/a4f9f4b/nginx/`. They have not been applied. The target `/www/server/panel/vhost/nginx/blog.shifuf.com.conf` is outside the user's authorized write directory; obtain explicit authorization for that site configuration and the graceful nginx reload before applying. Keep the global cache configuration and other virtual hosts intact. Verify the staged original SHA256 still matches, apply the two-line patch, validate the complete active configuration, and gracefully reload. Then verify public requests for both an initial and a nonzero byte range return 206 with matching `Content-Range` and byte counts. Restore the preserved original if configuration validation or service checks fail. Until the public tests pass, music seeking delivery remains incomplete.
 
 ## Restore drill and offsite
 

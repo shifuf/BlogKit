@@ -1,6 +1,7 @@
 .claude
 .ace-tool/
 .codex-backup/
+.codex-release/
 .mindfs/
 node_modules/
 .nuxt/
