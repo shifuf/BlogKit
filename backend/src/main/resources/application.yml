@@ -120,12 +120,13 @@ blog:
     api-key: ${BLOG_NOTIFY_API_KEY:}
     timeout-seconds: ${BLOG_NOTIFY_TIMEOUT_SECONDS:10}
   music:
-    # 统一搜索 QQ、网易云和米兔；解析、封面、音频 Range 均经后端代理。
+    # 统一搜索迟言与 ChKSz；后台可设置密钥，解析、封面、音频 Range 经后端代理。
     api-base: ${BLOG_MUSIC_API_BASE:https://cyapi.top/API/qq_music.php}
     api-key: ${BLOG_MUSIC_API_KEY:}
     netease-api-base: ${BLOG_MUSIC_NETEASE_API_BASE:https://cyapi.top/API/netease.php}
     netease-api-key: ${BLOG_MUSIC_NETEASE_API_KEY:}
-    mitu-api-base: ${BLOG_MUSIC_MITU_API_BASE:https://www.qqmp3.vip/api}
+    chksz-api-base: ${BLOG_MUSIC_CHKSZ_API_BASE:https://api.chksz.com}
+    chksz-api-key: ${BLOG_MUSIC_CHKSZ_API_KEY:}
   health:
     # 站点体检探测 /feed.xml、/sitemap.xml 用的地址。后端与前端是独立容器，
     # 后端内 localhost 没有前端服务，需用 compose 网络内的服务名 frontend:3256。

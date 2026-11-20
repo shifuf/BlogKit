@@ -1,11 +1,12 @@
 import request from '@/utils/request';
-export const listSettings = group => request.get('/admin/settings', {
+export const listSettings = group => request.get(group === 'music' ? '/admin/music/settings' : '/admin/settings', {
   params: {
     group
   }
 });
 export const saveSetting = data => request.post('/admin/settings', data);
-export const saveSettingGroup = (group, data) => request.put(`/admin/settings/${group}`, data);
+export const saveSettingGroup = (group, data) => request.put(group === 'music' ? '/admin/music/settings' : `/admin/settings/${group}`, data);
+export const musicProviderStatus = () => request.get('/admin/music/status');
 export const exportSettings = () => request.get('/admin/settings/export');
 export const importSettings = data => request.post('/admin/settings/import', data);
 export const testAiConnection = data => request.post('/admin/settings/ai/test', data);

@@ -27,6 +27,9 @@ const tabs = [{
   key: 'notification',
   label: '通知配置'
 }, {
+  key: 'music',
+  label: '音乐配置'
+}, {
   key: 'ai',
   label: 'AI 配置'
 }, {

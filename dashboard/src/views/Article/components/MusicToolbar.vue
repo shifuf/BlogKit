@@ -47,7 +47,7 @@
           <div v-if="loading" class="music-hint">
             <div class="hint-loader"><span></span><span></span><span></span></div>
             <div class="hint-title">正在搜索</div>
-            <div class="hint-desc">正在检查 QQ、网易云和米兔音乐…</div>
+            <div class="hint-desc">正在搜索可用音乐源…</div>
           </div>
           <div v-else-if="list.length === 0 && searched" class="music-hint">
             <div class="hint-icon">♪</div>
@@ -210,7 +210,7 @@ const resolveTrack = async item => {
   const track = {
     name: item.name || '未命名音乐',
     artist: item.artist || '未知歌手',
-    cover: item.cover || '',
+    cover: data.cover || item.cover || '',
     sourceType: 'combined',
     url: data.url,
     lyric: data.lyric || '',

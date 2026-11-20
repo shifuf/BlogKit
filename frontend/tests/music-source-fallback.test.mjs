@@ -10,7 +10,7 @@ test('audio errors advance to the next candidate and stop after the final source
   }
 
   const audio = new FakeAudio()
-  const candidates = [{ source: 'qq', url: '/qq' }, { source: 'mitu', url: '/mitu' }]
+  const candidates = [{ source: 'qq', url: '/qq' }, { source: 'chksz_qq', url: '/chksz' }]
   const changes = []
   let exhausted = 0
   const dispose = attachMusicSourceFallback(audio, candidates, {
@@ -20,12 +20,12 @@ test('audio errors advance to the next candidate and stop after the final source
   })
 
   audio.dispatchEvent(new Event('error'))
-  assert.equal(audio.src, '/mitu')
+  assert.equal(audio.src, '/chksz')
   assert.equal(audio.loads, 1)
   assert.equal(audio.plays, 1)
   audio.dispatchEvent(new Event('loadedmetadata'))
   assert.equal(audio.currentTime, 42)
-  assert.deepEqual(changes, ['mitu'])
+  assert.deepEqual(changes, ['chksz_qq'])
 
   audio.dispatchEvent(new Event('error'))
   assert.equal(exhausted, 1)
@@ -39,8 +39,8 @@ test('source fallback does not restart a player the listener paused', () => {
     play() { this.plays += 1; return Promise.resolve() }
   }
   const audio = new FakeAudio()
-  attachMusicSourceFallback(audio, [{ url: '/qq' }, { url: '/mitu' }], { shouldResume: () => false })
+  attachMusicSourceFallback(audio, [{ url: '/qq' }, { url: '/chksz' }], { shouldResume: () => false })
   audio.dispatchEvent(new Event('error'))
-  assert.equal(audio.src, '/mitu')
+  assert.equal(audio.src, '/chksz')
   assert.equal(audio.plays, 0)
 })

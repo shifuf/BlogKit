@@ -30,29 +30,29 @@ public class MusicService {
     /** Stream proxy client; redirects are validated and followed manually. */
     private final HttpClient streamClient;
     private final String apiBase;
-    private final String apiKey;
     private final String neteaseApiBase;
-    private final String neteaseApiKey;
-    private final String mituApiBase;
+    private final String chkszApiBase;
+    private final MusicSettingsService settings;
+    private final MusicApiClient apiClient;
 
     public MusicService(
             ObjectMapper objectMapper,
             OutboundUrlValidator outboundUrlValidator,
             DownloadCipher downloadCipher,
+            MusicSettingsService settings,
+            MusicApiClient apiClient,
             @Value("${blog.music.api-base:https://cyapi.top/API/qq_music.php}") String apiBase,
-            @Value("${blog.music.api-key:}") String apiKey,
             @Value("${blog.music.netease-api-base:https://cyapi.top/API/netease.php}") String neteaseApiBase,
-            @Value("${blog.music.netease-api-key:}") String neteaseApiKey,
-            @Value("${blog.music.mitu-api-base:https://www.qqmp3.vip/api}") String mituApiBase
+            @Value("${blog.music.chksz-api-base:https://api.chksz.com}") String chkszApiBase
     ) {
         this.objectMapper = objectMapper;
         this.outboundUrlValidator = outboundUrlValidator;
         this.downloadCipher = downloadCipher;
         this.apiBase = stripSlash(apiBase);
-        this.apiKey = apiKey == null ? "" : apiKey.trim();
         this.neteaseApiBase = stripSlash(neteaseApiBase);
-        this.neteaseApiKey = neteaseApiKey == null ? "" : neteaseApiKey.trim();
-        this.mituApiBase = stripSlash(mituApiBase);
+        this.chkszApiBase = stripSlash(chkszApiBase);
+        this.settings = settings;
+        this.apiClient = apiClient;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(5))
                 .followRedirects(HttpClient.Redirect.NEVER)
@@ -69,15 +69,18 @@ public class MusicService {
         // Search the configured providers independently so one unavailable service does not hide
         // the results from the others.
         List<ProviderItem> items = new ArrayList<>();
-        collect(items, () -> searchProvider(safe, apiBase, apiKey, "qq", "QQ"));
-        collect(items, () -> searchProvider(safe, neteaseApiBase, neteaseApiKey, "netease", "网易云"));
-        collect(items, () -> searchMitu(safe));
+        collect(items, () -> searchProvider(safe, apiBase, settings.key("cyQqKey"), "qq", "迟言 QQ"));
+        collect(items, () -> searchProvider(safe, neteaseApiBase, settings.key("cyNeteaseKey"), "netease", "迟言网易云"));
+        for (String source : List.of("chksz_qq", "chksz_netease", "chksz_kugou")) {
+            collect(items, () -> searchChksz(safe, source));
+        }
+        if (items.isEmpty() && !providerStatus().isEmpty()) throw new BusinessException("音乐服务暂不可用，请稍后重试；管理员可在音乐配置中查看原因");
         return merge(items, safe);
     }
 
     private List<ProviderItem> searchProvider(String keyword, String base, String key, String source, String label) {
         if (!StringUtils.hasText(key)) return List.of();
-        JsonNode list = get(base, "?apikey=" + encode(key) + "&msg=" + encode(keyword) + "&num=20&type=json").path("list");
+        JsonNode list = apiClient.get(label, key, base + "?apikey=" + encode(key) + "&msg=" + encode(keyword) + "&num=20&type=json", Duration.ofMinutes(5)).path("list");
         if (!list.isArray()) return List.of();
         List<ProviderItem> result = new ArrayList<>();
         int index = 1;
@@ -120,14 +123,27 @@ public class MusicService {
         return result;
     }
 
-    private List<ProviderItem> searchMitu(String keyword) {
-        JsonNode list = get(mituApiBase, "/songs.php?type=search&keyword=" + encode(keyword)).path("data");
+    public java.util.Map<String, String> providerStatus() { return apiClient.status(); }
+
+    private JsonNode chksz(String path, String params, Duration ttl) {
+        String key = settings.key("chkszKey");
+        requireApiKey(key);
+        return apiClient.get("ChKSz", key, chkszApiBase + path + "?apikey=" + encode(key) + "&" + params, ttl);
+    }
+
+    private List<ProviderItem> searchChksz(String keyword, String source) {
+        if (settings.key("chkszKey").isBlank()) return List.of();
+        boolean ne = "chksz_netease".equals(source);
+        String path = ne ? "/api/163_search" : "chksz_qq".equals(source) ? "/api/qq_music" : "/api/kugou_music";
+        JsonNode body = chksz(path, (ne ? "keyword=" : "msg=") + encode(keyword) + "&limit=20&num=20", Duration.ofMinutes(5));
+        JsonNode list = ne ? (body.path("data").isArray() ? body.path("data") : body.path("data").path("songs")) : body.path("list");
         if (!list.isArray()) return List.of();
         List<ProviderItem> result = new ArrayList<>();
         for (JsonNode item : list) {
-            String rid = item.path("rid").asText("").trim();
-            if (!rid.matches("\\d{1,20}")) continue;
-            result.add(new ProviderItem("mitu", rid, item.path("name").asText("未命名音乐"), artist(item), item.path("pic").asText(""), "米兔"));
+            String id = item.path("chksz_qq".equals(source) ? "mid" : "id").asText("");
+            if (!id.matches("[A-Za-z0-9_-]{1,100}")) continue;
+            result.add(new ProviderItem(source, id, item.path("name").asText("未命名音乐"), artist(item),
+                    firstNonBlank(cover(item.path("cover")), item.path("picUrl").asText("")), "自动切换"));
             if (result.size() >= 20) break;
         }
         return result;
@@ -139,7 +155,7 @@ public class MusicService {
      */
     public MusicTrack resolve(String rid) {
         String safeRid = required(rid, "缺少音乐资源 ID");
-        if (safeRid.length() > 2048) throw new BusinessException("音乐资源 ID 无效");
+        if (safeRid.length() > 16384) throw new BusinessException("音乐资源 ID 无效");
         RidTarget target = decodeRid(safeRid);
         if (!"combined".equals(target.source())) throw new BusinessException("音乐资源 ID 无效");
         return resolveCombined(safeRid, target);
@@ -155,7 +171,7 @@ public class MusicService {
                 try {
                     MusicTrack resolved = resolveUpstream(candidate.rid());
                     if (firstTrack == null) firstTrack = resolved;
-                    candidates.add(new MusicCandidate(candidate.rid(), sourceOf(candidate.rid()), "/api/v1/music/stream?rid=" + encode(candidate.rid()), coverUrl(candidate.cover()), resolved.lyric()));
+                    candidates.add(new MusicCandidate(candidate.rid(), sourceOf(candidate.rid()), "/api/v1/music/stream?rid=" + encode(candidate.rid()), coverUrl(firstNonBlank(resolved.cover(), candidate.cover())), resolved.lyric()));
                 } catch (RuntimeException ignored) { /* a failed source is skipped */ }
             }
             if (candidates.isEmpty() || firstTrack == null) throw new BusinessException("当前歌曲的音乐源都暂不可用");
@@ -174,21 +190,21 @@ public class MusicService {
 
     /** 服务端内部：解析真实上游播放地址（仅供 stream 代理使用，不进浏览器）。 */
     public MusicTrack resolveUpstream(String rid) {
+        return resolveUpstream(rid, true);
+    }
+
+    MusicTrack resolveUpstream(String rid, boolean includeLyrics) {
         String safeRid = required(rid, "缺少音乐资源 ID");
-        if (safeRid.length() > 2048) throw new BusinessException("音乐资源 ID 无效");
+        if (safeRid.length() > 16384) throw new BusinessException("音乐资源 ID 无效");
         RidTarget target = decodeRid(safeRid);
-        if ("mitu".equals(target.source())) {
-            JsonNode play = get(mituApiBase, "/kw.php?rid=" + encode(target.target()));
-            String url = firstNonBlank(play.path("data").path("url").asText(""), play.path("url").asText(""));
-            if (!StringUtils.hasText(url)) throw new BusinessException("该音乐暂时没有可播放地址");
-            return new MusicTrack(url, play.path("data").path("lrc").asText(""), "", "", "", List.of());
-        }
+        if (target.source().startsWith("chksz_")) return resolveChksz(target, includeLyrics);
         if (!List.of("qq", "netease").contains(target.source())) throw new BusinessException("音乐资源 ID 无效");
         String base = "netease".equals(target.source()) ? neteaseApiBase : apiBase;
-        String key = "netease".equals(target.source()) ? neteaseApiKey : apiKey;
+        String key = settings.key("netease".equals(target.source()) ? "cyNeteaseKey" : "cyQqKey");
         requireApiKey(key);
-        JsonNode data = get(base, "?apikey=" + encode(key) + "&msg=" + encode(target.keyword())
-                + "&num=20&type=json&n=" + target.target());
+        JsonNode data = apiClient.get("netease".equals(target.source()) ? "迟言网易云" : "迟言 QQ", key,
+                base + "?apikey=" + encode(key) + "&msg=" + encode(target.keyword())
+                + "&num=20&type=json&n=" + target.target(), Duration.ofMinutes(3));
         String url = data.path("url").asText("");
         if (!StringUtils.hasText(url)) throw new BusinessException("该音乐暂时没有可播放地址");
         JsonNode lyric = data.path("lyric");
@@ -202,12 +218,31 @@ public class MusicService {
         );
     }
 
+    private MusicTrack resolveChksz(RidTarget target, boolean includeLyrics) {
+        boolean ne = "chksz_netease".equals(target.source());
+        boolean qq = "chksz_qq".equals(target.source());
+        JsonNode body = chksz(ne ? "/api/163_music" : qq ? "/api/qq_music" : "/api/kugou_music",
+                (qq ? "mid=" : "id=") + encode(target.target()) + (ne ? "&level=exhigh" : "&size=320k"), Duration.ofMinutes(3));
+        JsonNode data = body.path("data").isObject() ? body.path("data") : body;
+        String url = firstNonBlank(data.path("url").asText(""), body.path("url").asText(""));
+        if (!StringUtils.hasText(url)) throw new BusinessException("该音乐暂时没有可播放地址");
+        String lyric = firstNonBlank(data.path("lrc").asText(""), data.path("lyric").isTextual() ? data.path("lyric").asText() : data.path("lyric").path("text").asText(""));
+        if (includeLyrics && ne && !StringUtils.hasText(lyric)) {
+            try { lyric = chksz("/api/163_lyric", "id=" + encode(target.target()), Duration.ofHours(6)).path("data").path("lrc").asText(""); }
+            catch (BusinessException ignored) { /* Lyrics must not prevent otherwise playable audio. */ }
+        }
+        return new MusicTrack(url, lyric, data.path("name").asText(""), artist(data),
+                firstNonBlank(cover(data.path("cover")), data.path("pic").asText(""), data.path("picUrl").asText("")), List.of());
+    }
+
     /**
      * 同源音频代理：浏览器用 stream 地址播，后端再向第三方拉流转发。
      * 支持 Range，便于进度条拖动。
      */
     public StreamResult openStream(String rid, String rangeHeader) {
-        MusicTrack track = resolveUpstream(rid);
+        MusicTrack track;
+        try { track = resolveUpstream(rid, false); }
+        catch (BusinessException ex) { throw new BusinessException("音乐暂时无法播放，请稍后重试"); }
         try {
             URI uri = validateMediaUri(track.url());
             HttpResponse<java.io.InputStream> response = null;
@@ -243,26 +278,6 @@ public class MusicService {
             throw ex;
         } catch (Exception ex) {
             throw new BusinessException("音乐流暂时不可用");
-        }
-    }
-
-    private JsonNode get(String base, String path) {
-        try {
-            HttpRequest request = HttpRequest.newBuilder(outboundUrlValidator.validate(base + path))
-                    .timeout(Duration.ofSeconds(12))
-                    .header("Accept", "application/json")
-                    .header("Referer", "https://www.qqmp3.vip/")
-                    .header("User-Agent", "blog-music-widget/1.0")
-                    .GET().build();
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
-            if (response.statusCode() < 200 || response.statusCode() >= 300) {
-                throw new BusinessException("音乐服务返回 HTTP " + response.statusCode());
-            }
-            return objectMapper.readTree(response.body());
-        } catch (BusinessException ex) {
-            throw ex;
-        } catch (Exception ex) {
-            throw new BusinessException("音乐服务暂时不可用");
         }
     }
 
@@ -333,7 +348,7 @@ public class MusicService {
     private boolean allowedImageHost(String hostname) {
         if (!StringUtils.hasText(hostname)) return false;
         String host = hostname.toLowerCase(java.util.Locale.ROOT);
-        return List.of("qq.com", "gtimg.cn", "qpic.cn", "qqmp3.vip", "kuwo.cn", "126.net", "163.com")
+        return List.of("qq.com", "gtimg.cn", "qpic.cn", "126.net", "163.com", "kugou.com", "kugou.net", "kgimg.com", "chksz.com")
                 .stream().anyMatch(domain -> host.equals(domain) || host.endsWith("." + domain));
     }
 
@@ -349,7 +364,7 @@ public class MusicService {
             for (int redirects = 0; redirects <= 3; redirects++) {
                 HttpRequest request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(8))
                         .header("Accept", "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8")
-                        .header("Referer", "https://www.qqmp3.vip/")
+                        .header("Referer", "https://y.qq.com/")
                         .header("User-Agent", "blog-music-widget/1.0")
                         .GET().build();
                 response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -395,14 +410,14 @@ public class MusicService {
                 decoded = decoded.substring(3);
             }
             String[] parts = decoded.split("\\t", 3);
-            if (parts.length != 3 || !List.of("qq", "netease", "mitu", "combined").contains(parts[0]) || !StringUtils.hasText(parts[2])) {
+            if (parts.length != 3 || !List.of("qq", "netease", "chksz_qq", "chksz_netease", "chksz_kugou", "combined").contains(parts[0]) || !StringUtils.hasText(parts[2])) {
                 throw new IllegalArgumentException();
             }
             if (List.of("qq", "netease").contains(parts[0])) {
                 int index = Integer.parseInt(parts[2]);
                 if (index < 1 || index > 20) throw new IllegalArgumentException();
             }
-            if ("mitu".equals(parts[0]) && !parts[2].matches("\\d{1,20}")) throw new IllegalArgumentException();
+            if (parts[0].startsWith("chksz_") && !parts[2].matches("[A-Za-z0-9_-]{1,100}")) throw new IllegalArgumentException();
             if ("combined".equals(parts[0])) Base64.getUrlDecoder().decode(parts[2]);
             return new RidTarget(parts[0], parts[1], parts[2]);
         } catch (BusinessException ex) {

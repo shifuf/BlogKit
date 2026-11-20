@@ -68,6 +68,7 @@ public class SystemManagementService {
     private final OutboundUrlValidator outboundUrlValidator;
     private final ExternalNotificationService externalNotificationService;
     private final String publicSiteUrl;
+    private final MusicSettingsService musicSettings;
 
     public SystemManagementService(
             AdminMenuRepository menuRepository,
@@ -82,6 +83,7 @@ public class SystemManagementService {
             ObjectMapper objectMapper,
             OutboundUrlValidator outboundUrlValidator,
             ExternalNotificationService externalNotificationService,
+            MusicSettingsService musicSettings,
             @Value("${blog.public-site-url:}") String publicSiteUrl
     ) {
         this.menuRepository = menuRepository;
@@ -97,6 +99,7 @@ public class SystemManagementService {
         this.outboundUrlValidator = outboundUrlValidator;
         this.externalNotificationService = externalNotificationService;
         this.publicSiteUrl = stripTrailingSlash(publicSiteUrl);
+        this.musicSettings = musicSettings;
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(8))
                 // 禁止跟随重定向，避免首跳公网校验通过后 302 到内网（SSRF）。
@@ -567,14 +570,17 @@ public class SystemManagementService {
     @Transactional(readOnly = true)
     public List<SiteSetting> listSettings(String group) {
         requireAdmin();
-        return StringUtils.hasText(group)
+        if ("music".equals(group)) return musicSettings.list();
+        List<SiteSetting> rows = StringUtils.hasText(group)
                 ? settingRepository.findAllBySettingGroupOrderBySettingKeyAsc(group)
                 : settingRepository.findAllByOrderBySettingGroupAscSettingKeyAsc();
+        return rows.stream().filter(s -> !"music".equals(s.getSettingGroup())).toList();
     }
 
     @Transactional(readOnly = true)
     public Map<String, String> getSettingGroupValues(String group) {
         requireAdmin();
+        if ("music".equals(group)) return musicSettings.list().stream().collect(java.util.stream.Collectors.toMap(SiteSetting::getSettingKey, SiteSetting::getSettingValue));
         return readGroupValues(required(group, "配置分组不能为空"));
     }
 
@@ -584,6 +590,8 @@ public class SystemManagementService {
         requireAdmin();
         String group = required(request.getSettingGroup(), "配置分组不能为空");
         String key = required(request.getSettingKey(), "配置键不能为空");
+        if ("music".equals(group)) return musicSettings.save(java.util.Collections.singletonMap(key, request.getSettingValue()))
+                .stream().filter(s -> key.equals(s.getSettingKey())).findFirst().orElseThrow(() -> new BusinessException("未知音乐配置"));
         SiteSetting setting = settingRepository.findBySettingGroupAndSettingKey(group, key).orElseGet(SiteSetting::new);
         setting.setSettingGroup(group);
         setting.setSettingKey(key);
@@ -597,6 +605,7 @@ public class SystemManagementService {
     public List<SiteSetting> saveSettingGroup(String group, Map<String, String> values) {
         requireAdmin();
         String safeGroup = required(group, "配置分组不能为空");
+        if ("music".equals(safeGroup)) return musicSettings.save(values);
         Set<String> allowedKeys = allowedSettingKeys(safeGroup);
         values.forEach((key, value) -> {
             if (allowedKeys.contains(key)) {
@@ -611,6 +620,7 @@ public class SystemManagementService {
         requireAdmin();
         Map<String, Map<String, String>> result = new LinkedHashMap<>();
         for (SiteSetting setting : settingRepository.findAllByOrderBySettingGroupAscSettingKeyAsc()) {
+            if ("music".equals(setting.getSettingGroup())) continue;
             result.computeIfAbsent(setting.getSettingGroup(), key -> new LinkedHashMap<>())
                     .put(setting.getSettingKey(), setting.getSettingValue());
         }
@@ -621,9 +631,10 @@ public class SystemManagementService {
     public List<SiteSetting> importSettings(Map<String, Map<String, String>> payload) {
         requireAdmin();
         payload.forEach((group, values) -> values.forEach((key, value) -> {
-            saveSettingValue(group, key, value, settingDescription(group, key));
+            if ("music".equals(group)) musicSettings.save(java.util.Collections.singletonMap(key, value));
+            else saveSettingValue(group, key, value, settingDescription(group, key));
         }));
-        return settingRepository.findAllByOrderBySettingGroupAscSettingKeyAsc();
+        return listSettings(null);
     }
 
     @Transactional(readOnly = true)

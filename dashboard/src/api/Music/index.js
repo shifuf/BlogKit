@@ -11,11 +11,11 @@ async function unwrapMusicPayload(data) {
 }
 
 export const searchMusic = async keyword => {
-  const data = await request.get('/music/search', { params: { keyword } });
+  const data = await request.get('/music/search', { params: { keyword }, timeout: 60000 });
   return unwrapMusicPayload(data);
 };
 
 export const resolveMusic = async rid => {
-  const data = await request.get('/music/resolve', { params: { rid } });
+  const data = await request.get('/music/resolve', { params: { rid }, timeout: 60000 });
   return unwrapMusicPayload(data);
 };

@@ -17,6 +17,15 @@
       </header>
 
       <a-alert
+        v-if="group === 'music'"
+        class="settings-tip"
+        type="info"
+        show-icon
+        message="播放源自动选择，失败时自动切换"
+        description="密钥保存后立即生效。保留星号表示不修改，清空后保存可停用该接口。ChKSz 的 QQ、网易云和酷狗共用一个密钥；搜索和解析有缓存，鉴权或额度错误会暂停调用。"
+      />
+      <a-alert v-if="group === 'music' && musicErrors" class="settings-tip" type="warning" show-icon :message="musicErrors" />
+      <a-alert
         v-if="group === 'blog'"
         class="settings-tip"
         type="warning"
@@ -231,7 +240,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { message } from 'ant-design-vue';
-import { listSettings, saveSettingGroup, testAiConnection, testUploadConnection, testNotificationPlatform, testReplyEmail, listAiModels, listEmailTemplates } from '@/api/Settings';
+import { listSettings, saveSettingGroup, musicProviderStatus, testAiConnection, testUploadConnection, testNotificationPlatform, testReplyEmail, listAiModels, listEmailTemplates } from '@/api/Settings';
 import { uploadImageWithCrop } from '@/utils/imageCrop';
 import { getCategoryList } from '@/api/Category';
 import { getArticleList, getArticleDetail } from '@/api/Article';
@@ -271,6 +280,7 @@ const props = defineProps({
   }
 });
 const loading = ref(false);
+const musicErrors = ref('');
 const saving = ref(false);
 const uploadingImageKey = ref('');
 const imagePickerOpen = ref(false);
@@ -293,6 +303,16 @@ const articleOptions = ref([]);
 const articleLoading = ref(false);
 let articleSearchTimer = null;
 const fieldGroups = {
+  music: [{
+    key: 'cyQqKey', label: '迟言 QQ 音乐 API Key', type: 'password', defaultValue: '',
+    extra: '用于迟言 QQ 音乐接口。'
+  }, {
+    key: 'cyNeteaseKey', label: '迟言网易云 API Key', type: 'password', defaultValue: '',
+    extra: '可与迟言 QQ 使用相同密钥，也可分别设置。'
+  }, {
+    key: 'chkszKey', label: 'ChKSz 统一 API Key', type: 'password', defaultValue: '', full: true,
+    extra: 'QQ、网易云、酷狗共用；请注意账户的每日额度和每分钟调用限制。'
+  }],
   basic: [{
     key: 'siteName',
     label: '站点名称',
@@ -777,6 +797,10 @@ const loadSettings = async () => {
       loadCategoryOptions();
     }
     const rows = await listSettings(group.value);
+    if (group.value === 'music') {
+      const statuses = await musicProviderStatus();
+      musicErrors.value = Object.values(statuses || {}).join('；');
+    }
     const values = Object.fromEntries((rows || []).map(item => [item.settingKey, item.settingValue]));
     resetFormValues();
     fields.value.forEach(field => {
