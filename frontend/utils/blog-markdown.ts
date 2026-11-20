@@ -12,8 +12,10 @@ export function applyBlogContainer(md: MarkdownIt): void {
   });
   md.renderer.rules.bd_secret_open = (tokens, idx) => {
     const token = tokens[idx];
-    const gate = (token?.info || 'login').trim() || 'login';
-    return `<div class="bd-block bd-block--secret" data-gate="${md.utils.escapeHtml(gate)}">\n`;
+    const [rawGate = 'login', rawId = ''] = (token?.info || 'login').trim().split(/\s+/);
+    const gate = ['login', 'comment', 'password', 'users'].includes(rawGate) ? rawGate : 'invalid';
+    const id = /^section-\d+$/.test(rawId) ? rawId : '';
+    return `<div class="bd-block bd-block--secret" data-gate="${gate}" data-section-id="${id}">\n`;
   };
   md.renderer.rules.bd_secret_close = () => '</div>\n';
   // 图片组（九宫格）：包裹内部的图片，前台按网格展示，超 9 张折叠+查看更多。

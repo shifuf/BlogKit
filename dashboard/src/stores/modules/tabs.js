@@ -13,7 +13,9 @@ export const tabsStore = defineStore('tabsStore', {
   actions: {
     addTab(tab) {
       if (tab.path == '/login') return;
-      if (this.tabsList.some(item => item.path === tab.path)) {
+      const existing = this.tabsList.find(item => item.path === tab.path);
+      if (existing) {
+        Object.assign(existing, tab);
         return;
       }
       this.tabsList.push(tab);

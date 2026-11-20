@@ -243,7 +243,7 @@ public class PublicSystemController {
         response.setStatus(stream.status());
         response.setHeader("Content-Type", stream.contentType());
         response.setHeader("Accept-Ranges", stream.acceptRanges() == null ? "bytes" : stream.acceptRanges());
-        response.setHeader("Cache-Control", "private, max-age=300");
+        response.setHeader("Cache-Control", "private, no-store");
         if (StringUtils.hasText(stream.contentLength())) {
             response.setHeader("Content-Length", stream.contentLength());
         }

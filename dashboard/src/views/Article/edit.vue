@@ -71,11 +71,12 @@
                 >
                   <template #defToolbars>
                     <DownloadToolbar ref="downloadToolbarRef" :article-id="articleId" @insert="insertBlock" @replace="replaceBlock" />
-                    <SecretToolbar @select="insertSecret" />
+                    <SecretToolbar :users="userOptions" @select="insertSecret" />
                     <ButtonToolbar ref="buttonToolbarRef" :article-id="articleId" @insert="insertBlock" @replace="replaceBlock" />
                     <GalleryToolbar @pick="insertGallery" />
                     <MusicToolbar @insert="insertMusic" />
                     <LibraryToolbar @open="attachmentPickerOpen = true" />
+                    <TimeToolbar @insert="insertBlock" />
                   </template>
                 </MdEditor>
               </div>
@@ -317,6 +318,7 @@ import { unsealDownload } from '@/api/Download';
 import { formatDateTime } from '@/utils/date';
 import DownloadToolbar from './components/DownloadToolbar.vue';
 import SecretToolbar from './components/SecretToolbar.vue';
+import TimeToolbar from './components/TimeToolbar.vue';
 import ButtonToolbar from './components/ButtonToolbar.vue';
 import GalleryToolbar from './components/GalleryToolbar.vue';
 import MusicToolbar from './components/MusicToolbar.vue';
@@ -353,8 +355,8 @@ config({
     };
   }
 });
-const desktopToolbars = ['bold', 'underline', 'italic', '-', 'title', 'strikeThrough', 'quote', 'unorderedList', 'orderedList', 'task', '-', 'codeRow', 'code', 'link', 'image', 'table', '-', 0, 1, 2, 3, 4, 5, '-', 'revoke', 'next', '-', 'preview', 'htmlPreview', 'catalog', '-', 'pageFullscreen', 'fullscreen'];
-const mobileToolbars = ['bold', 'underline', 'italic', '-', 'title', 'strikeThrough', 'quote', 'unorderedList', 'orderedList', 'task', '-', 'codeRow', 'code', 'link', 'image', 'table', '-', 0, 1, 2, 3, 4, 5, '-', 'revoke', 'next', '-', 'previewOnly', 'catalog', '-', 'pageFullscreen', 'fullscreen'];
+const desktopToolbars = ['bold', 'underline', 'italic', '-', 'title', 'strikeThrough', 'quote', 'unorderedList', 'orderedList', 'task', '-', 'codeRow', 'code', 'link', 'image', 'table', '-', 0, 1, 2, 3, 4, 5, 6, '-', 'revoke', 'next', '-', 'preview', 'htmlPreview', 'catalog', '-', 'pageFullscreen', 'fullscreen'];
+const mobileToolbars = ['bold', 'underline', 'italic', '-', 'title', 'strikeThrough', 'quote', 'unorderedList', 'orderedList', 'task', '-', 'codeRow', 'code', 'link', 'image', 'table', '-', 0, 1, 2, 3, 4, 5, 6, '-', 'revoke', 'next', '-', 'previewOnly', 'catalog', '-', 'pageFullscreen', 'fullscreen'];
 const attachmentPickerOpen = ref(false);
 const coverPickerOpen = ref(false);
 const route = useRoute();
@@ -1501,6 +1503,12 @@ onBeforeUnmount(() => {
     padding-top: 10px;
     border-top: 1px dashed #e5e7eb;
   }
+  .bd-card--music { display: flex; align-items: center; gap: 14px; color: var(--ant-color-text, #1f2937); background: var(--ant-color-bg-container, #fff); }
+  .bd-card__music-cover { width: 64px; height: 64px; flex: 0 0 64px; border-radius: 10px; object-fit: cover; margin: 0; }
+  .bd-card__music-cover--empty { display: grid; place-items: center; background: var(--ant-color-fill-secondary, #eef2ff); font-size: 26px; }
+  .bd-card__music-meta { display: flex; flex-direction: column; min-width: 0; gap: 5px; }
+  .bd-card__music-name { font-size: 15px; overflow-wrap: anywhere; }
+  .bd-card__music-artist { font-size: 13px; color: var(--ant-color-text-secondary, #64748b); overflow-wrap: anywhere; }
   .bd-card--broken {
     color: #b91c1c;
     background: #fef2f2;

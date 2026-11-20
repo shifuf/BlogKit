@@ -40,7 +40,7 @@
               <span v-else>搜索</span>
             </button>
           </div>
-          <div class="music-help">搜索结果已合并。播放失败时会自动切换到同名、同歌手的备用源；文章只保存曲目 ID 与封面。</div>
+          <div class="music-help">选择封面、歌名和歌手即可插入，播放失败时自动切换备用源。</div>
         </div>
 
         <div class="music-modal-body">

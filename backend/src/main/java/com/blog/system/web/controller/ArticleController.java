@@ -110,6 +110,17 @@ public class ArticleController {
         return ApiResponse.ok(articleQueryService.findRelatedArticles(id, size));
     }
 
+    @PostMapping("/{id}/sections/{sectionId}/unlock")
+    public ApiResponse<ArticleDetailResponse> unlockSection(
+            @PathVariable Long id, @PathVariable String sectionId,
+            @Valid @RequestBody ArticleUnlockRequest request, HttpServletRequest httpRequest) {
+        if (!sectionId.matches("section-[0-9]{1,7}")) throw new BusinessException("区块无效");
+        // Aggregate per article/IP, so changing block ids does not reset the guess budget.
+        if (!rateLimiter.tryAcquireStrict("section-unlock:" + clientIpResolver.resolve(httpRequest) + ":" + id, 10, 60_000))
+            throw new BusinessException("尝试过于频繁，请稍后再试");
+        return ApiResponse.ok(articleQueryService.unlockSection(id, sectionId, request.password()));
+    }
+
     @GetMapping("/{id}/neighbors")
     public ApiResponse<ArticleNeighborsResponse> listNeighbors(@PathVariable Long id) {
         return ApiResponse.ok(articleQueryService.findNeighbors(id));

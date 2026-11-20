@@ -227,7 +227,7 @@ export default defineNuxtConfig({
         href: '/feed.xml'
       }],
       script: [{
-        innerHTML: ";(function(){try{var t=localStorage.getItem('theme');document.documentElement.dataset.theme=t==='dark'?'dark':'light';}catch(e){}})();",
+        innerHTML: ";(function(){var t;try{t=localStorage.getItem('theme');}catch(e){}document.documentElement.dataset.theme=t==='dark'||t==='light'?t:window.matchMedia&&window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';})();",
         tagPosition: 'head'
       }]
     }

@@ -15,6 +15,20 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class ContentBoundaryTest {
+    @Test void passwordAndUserSectionsDoNotTreatAnyLoginAsAuthorization() {
+        var filter=new SecretBlockFilter(mock(ArticleCommentRepository.class),mock(CurrentUserService.class));
+        for (String gate : new String[]{"password eyJwYXNzd29yZCI6InNlY3JldCJ9", "users eyJ1c2VySWRzIjpbOTldfQ==", "unknown"}) {
+            String result=filter.filter("before\n:::bd-secret "+gate+"\nPRIVATE_SENTINEL\n:::\nafter",9L,reader(),1L);
+            assertFalse(result.contains("PRIVATE_SENTINEL"),gate);
+            assertFalse(result.contains("eyJ"),"Gate credentials must never leave the server");
+            assertTrue(result.contains("after"));
+        }
+    }
+    @Test void equalFenceNestedSectionsCannotLeakTheOuterTail() {
+        String source="before\n:::bd-secret password invalid\nouter secret\n:::bd-secret login\ninner secret\n:::\nPRIVATE_SENTINEL\n:::\nafter";
+        assertFalse(SecretBlockFilter.publicText(source).contains("PRIVATE_SENTINEL"));
+        assertTrue(SecretBlockFilter.publicText(source).contains("after"));
+    }
     @Test void legacyAutoSummaryNeverExposesSecretBlockText() {
         String body="Public introduction\n::::bd-secret login\nPRIVATE_SENTINEL\n::::\nPublic ending";
         String summary=SecretBlockFilter.safeSummary(body,"PRIVATE_SENTINEL");

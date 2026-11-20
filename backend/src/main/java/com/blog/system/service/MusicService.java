@@ -126,9 +126,14 @@ public class MusicService {
     public java.util.Map<String, String> providerStatus() { return apiClient.status(); }
 
     private JsonNode chksz(String path, String params, Duration ttl) {
+        return chksz(path, params, ttl, false);
+    }
+
+    private JsonNode chksz(String path, String params, Duration ttl, boolean refresh) {
         String key = settings.key("chkszKey");
         requireApiKey(key);
-        return apiClient.get("ChKSz", key, chkszApiBase + path + "?apikey=" + encode(key) + "&" + params, ttl);
+        String url = chkszApiBase + path + "?apikey=" + encode(key) + "&" + params;
+        return refresh ? apiClient.get("ChKSz", key, url, ttl, true) : apiClient.get("ChKSz", key, url, ttl);
     }
 
     private List<ProviderItem> searchChksz(String keyword, String source) {
@@ -194,17 +199,22 @@ public class MusicService {
     }
 
     MusicTrack resolveUpstream(String rid, boolean includeLyrics) {
+        return resolveUpstream(rid, includeLyrics, false);
+    }
+
+    private MusicTrack resolveUpstream(String rid, boolean includeLyrics, boolean refresh) {
         String safeRid = required(rid, "缺少音乐资源 ID");
         if (safeRid.length() > 16384) throw new BusinessException("音乐资源 ID 无效");
         RidTarget target = decodeRid(safeRid);
-        if (target.source().startsWith("chksz_")) return resolveChksz(target, includeLyrics);
+        if (target.source().startsWith("chksz_")) return resolveChksz(target, includeLyrics, refresh);
         if (!List.of("qq", "netease").contains(target.source())) throw new BusinessException("音乐资源 ID 无效");
         String base = "netease".equals(target.source()) ? neteaseApiBase : apiBase;
         String key = settings.key("netease".equals(target.source()) ? "cyNeteaseKey" : "cyQqKey");
         requireApiKey(key);
-        JsonNode data = apiClient.get("netease".equals(target.source()) ? "迟言网易云" : "迟言 QQ", key,
-                base + "?apikey=" + encode(key) + "&msg=" + encode(target.keyword())
-                + "&num=20&type=json&n=" + target.target(), Duration.ofMinutes(3));
+        String family = "netease".equals(target.source()) ? "迟言网易云" : "迟言 QQ";
+        String requestUrl = base + "?apikey=" + encode(key) + "&msg=" + encode(target.keyword()) + "&num=20&type=json&n=" + target.target();
+        JsonNode data = refresh ? apiClient.get(family, key, requestUrl, Duration.ofMinutes(3), true)
+                : apiClient.get(family, key, requestUrl, Duration.ofMinutes(3));
         String url = data.path("url").asText("");
         if (!StringUtils.hasText(url)) throw new BusinessException("该音乐暂时没有可播放地址");
         JsonNode lyric = data.path("lyric");
@@ -218,11 +228,11 @@ public class MusicService {
         );
     }
 
-    private MusicTrack resolveChksz(RidTarget target, boolean includeLyrics) {
+    private MusicTrack resolveChksz(RidTarget target, boolean includeLyrics, boolean refresh) {
         boolean ne = "chksz_netease".equals(target.source());
         boolean qq = "chksz_qq".equals(target.source());
         JsonNode body = chksz(ne ? "/api/163_music" : qq ? "/api/qq_music" : "/api/kugou_music",
-                (qq ? "mid=" : "id=") + encode(target.target()) + (ne ? "&level=exhigh" : "&size=320k"), Duration.ofMinutes(3));
+                (qq ? "mid=" : "id=") + encode(target.target()) + (ne ? "&level=exhigh" : "&size=320k"), Duration.ofMinutes(3), refresh);
         JsonNode data = body.path("data").isObject() ? body.path("data") : body;
         String url = firstNonBlank(data.path("url").asText(""), body.path("url").asText(""));
         if (!StringUtils.hasText(url)) throw new BusinessException("该音乐暂时没有可播放地址");
@@ -240,8 +250,12 @@ public class MusicService {
      * 支持 Range，便于进度条拖动。
      */
     public StreamResult openStream(String rid, String rangeHeader) {
+        return openStream(rid, rangeHeader, false);
+    }
+
+    private StreamResult openStream(String rid, String rangeHeader, boolean refreshed) {
         MusicTrack track;
-        try { track = resolveUpstream(rid, false); }
+        try { track = resolveUpstream(rid, false, refreshed); }
         catch (BusinessException ex) { throw new BusinessException("音乐暂时无法播放，请稍后重试"); }
         try {
             URI uri = validateMediaUri(track.url());
@@ -267,6 +281,9 @@ public class MusicService {
             int status = response.statusCode();
             if (status < 200 || status >= 400) {
                 try { response.body().close(); } catch (Exception ignored) {}
+                // Refresh once, retaining the exact Range. Never loop on rejected
+                // URLs, bypass API quota/circuit protection, or include lyric calls.
+                if (!refreshed && List.of(401, 403, 404, 410).contains(status)) return openStream(rid, rangeHeader, true);
                 throw new BusinessException("音乐流返回 HTTP " + status);
             }
             String contentType = response.headers().firstValue("Content-Type").orElse("audio/mpeg");

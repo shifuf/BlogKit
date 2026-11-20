@@ -33,7 +33,8 @@ export const useApiClient = () => {
     return $fetch<ApiResponse<ArticleDetail>>(`/articles/${id}`, {
       baseURL: config.public.apiBaseUrl,
       // Preserve HttpOnly article grants when fetching from SSR.
-      headers: { ...requestCookies, ...authHeaders() }
+      headers: { ...requestCookies, ...authHeaders() },
+      credentials: 'include'
     });
   };
   const fetchArticlePreview = (token: string) => {
@@ -48,7 +49,13 @@ export const useApiClient = () => {
       body: {
         password
       },
-      headers: authHeaders()
+      headers: authHeaders(),
+      credentials: 'include'
+    });
+  };
+  const unlockArticleSection = (id: number, sectionId: string, password: string) => {
+    return $fetch<ApiResponse<ArticleDetail>>(`/articles/${id}/sections/${encodeURIComponent(sectionId)}/unlock`, {
+      method: 'POST', baseURL: config.public.apiBaseUrl, body: { password }, headers: authHeaders(), credentials: 'include'
     });
   };
   const fetchRelatedArticles = (id: number, size = 4) => {
@@ -392,6 +399,7 @@ export const useApiClient = () => {
     fetchArticlePreview,
     recordArticleShare,
     unlockArticle,
+    unlockArticleSection,
     fetchRelatedArticles,
     fetchArticleArchive,
     fetchArticleArchiveYears,

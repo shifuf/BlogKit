@@ -2307,8 +2307,8 @@ html[data-theme='dark'] {
   --bg-soft: var(--bg-secondary);
   --text-primary: #e8e8e8;
   --text-secondary: #b0b0b0;
-  --text-tertiary: #888888;
-  --text-muted: #666666;
+  --text-tertiary: #a0a0a0;
+  --text-muted: #9ca3af;
   --text-content: #c0c0c0;
   --caption-color: #e8e8e8;
   --border-primary: #3a3a3a;
@@ -2320,6 +2320,36 @@ html[data-theme='dark'] {
   --color-link: #409eff;
   --color-link-hover: #66b1ff;
   --header-bg: color-mix(in srgb, var(--header-bg-color) 85%, transparent);
+}
+
+/* Element Plus uses its own tokens, including in teleported controls. Map
+   them to the same appearance as the page rather than leaving light defaults. */
+html[data-theme] {
+  --el-color-primary: var(--theme-color);
+  --el-bg-color: var(--bg-card);
+  --el-bg-color-page: var(--bg-page);
+  --el-bg-color-overlay: var(--bg-card);
+  --el-fill-color: var(--bg-hover);
+  --el-fill-color-light: var(--bg-soft);
+  --el-fill-color-lighter: var(--bg-soft);
+  --el-fill-color-extra-light: var(--bg-soft);
+  --el-fill-color-dark: var(--border-secondary);
+  --el-fill-color-darker: var(--border-primary);
+  --el-fill-color-blank: var(--bg-card);
+  --el-text-color-primary: var(--text-primary);
+  --el-text-color-regular: var(--text-secondary);
+  --el-text-color-secondary: var(--text-tertiary);
+  --el-text-color-placeholder: var(--text-muted);
+  --el-text-color-disabled: var(--text-muted);
+  --el-border-color: var(--border-input);
+  --el-border-color-light: var(--border-primary);
+  --el-border-color-lighter: var(--border-secondary);
+  --el-border-color-extra-light: var(--border-secondary);
+  --el-disabled-bg-color: var(--bg-soft);
+  --el-disabled-text-color: var(--text-muted);
+  --el-disabled-border-color: var(--border-color);
+  --el-mask-color: color-mix(in srgb, var(--bg-card) 90%, transparent);
+  --el-mask-color-extra-light: color-mix(in srgb, var(--bg-card) 60%, transparent);
 }
 
 body {
@@ -2885,6 +2915,12 @@ html.mobile-nav-open .site-header__top {
   inset: 0;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0) 40%, color-mix(in srgb, var(--bg-card) 88%, transparent));
   pointer-events: none;
+}
+.mobile-nav__user.has-hero {
+  background-image: var(--mobile-nav-hero);
+}
+.mobile-nav__user.has-hero::after {
+  background: color-mix(in srgb, var(--bg-card) 76%, transparent);
 }
 .mobile-nav__user-avatar {
   position: relative;
@@ -5514,7 +5550,7 @@ body.login-modal-open {
 .back-to-top {
   position: fixed;
   right: max(24px, calc((100vw - 1200px) / 2 - 72px));
-  bottom: 34px;
+  bottom: calc(34px + env(safe-area-inset-bottom, 0px));
   z-index: 45;
   display: inline-flex;
   align-items: center;

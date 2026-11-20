@@ -40,13 +40,14 @@
         :row-key="record => record.id"
         :pagination="pagination"
         :loading="loading"
+        :scroll="{ x: 730 }"
         bordered
         @change="handleTableChange"
         :row-selection="{ selectedRowKeys, onChange: onSelectChange }"
       >
         <template #bodyCell="{ column, record }">
           <template v-if="column.dataIndex === 'name'">
-            <a-tag color="blue">{{ record.name }}</a-tag>
+            <a-tag color="blue" class="tag-name">{{ record.name }}</a-tag>
           </template>
           <template v-else-if="column.dataIndex === 'articleCount'">
             <a-tag
@@ -93,8 +94,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
+import { ref, reactive, computed, onMounted } from 'vue';
+import { Grid, message } from 'ant-design-vue';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons-vue';
 import { getAdminTagList, deleteTag } from '@/api/Tag';
 import TagModal from './components/TagModal.vue';
@@ -110,18 +111,20 @@ const pagination = reactive({
   showQuickJumper: true,
   showTotal: total => `共 ${total} 条`
 });
-const columns = [{
+const screens = Grid.useBreakpoint();
+const columns = computed(() => [{
+  title: '标签名称',
+  dataIndex: 'name',
+  width: 180
+}, {
   title: 'ID',
   dataIndex: 'id',
   width: 80,
   align: 'center'
 }, {
-  title: '标签名称',
-  dataIndex: 'name',
-  ellipsis: true
-}, {
   title: 'Slug',
   dataIndex: 'slug',
+  width: 180,
   ellipsis: true
 }, {
   title: '文章数',
@@ -133,8 +136,8 @@ const columns = [{
   dataIndex: 'action',
   width: 150,
   align: 'center',
-  fixed: 'right'
-}];
+  fixed: screens.value.md ? 'right' : undefined
+}]);
 const tagList = ref([]);
 const allTagList = ref([]);
 const loading = ref(false);
@@ -221,6 +224,12 @@ onMounted(getList);
 
   .text-danger {
     color: #ff4d4f;
+  }
+
+  .tag-name {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 </style>

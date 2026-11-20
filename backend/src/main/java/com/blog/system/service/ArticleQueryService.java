@@ -45,6 +45,7 @@ public class ArticleQueryService {
     private final SecretBlockFilter secretBlockFilter;
     @org.springframework.beans.factory.annotation.Autowired private ArticleAccessGrantService accessGrants;
     @org.springframework.beans.factory.annotation.Autowired private ArticleMediaService media;
+    @org.springframework.beans.factory.annotation.Autowired private SecretSectionService secretSections;
 
     public ArticleQueryService(ArticleRepository articleRepository, SiteSettingRepository siteSettingRepository,
                                CurrentUserService currentUserService, PasswordEncoder passwordEncoder,
@@ -172,6 +173,16 @@ public class ArticleQueryService {
         if (article.getVisibility() == ArticleVisibility.PASSWORD) accessGrants.grant(article);
         articleRepository.incrementViewCount(id);
         article.setViewCount(article.getViewCount() + 1);
+        return toDetailResponse(article, defaultProfileAvatarUrl(), defaultProfileName(), true);
+    }
+
+    @Transactional
+    public ArticleDetailResponse unlockSection(Long id, String sectionId, String password) {
+        Article article = articleRepository.findByIdAndStatusAndDeletedAtIsNull(id, ArticleStatus.PUBLISHED)
+                .orElseThrow(() -> new com.blog.system.common.exception.NotFoundException("文章不存在或未发布"));
+        UserAccount viewer = currentUserService.getCurrentUserOrNull();
+        if (!canViewContent(article, viewer)) throw new BusinessException("请先取得文章访问权限");
+        secretSections.unlock(article.getContent(), article.getId(), article.getVersion(), sectionId, password, viewer);
         return toDetailResponse(article, defaultProfileAvatarUrl(), defaultProfileName(), true);
     }
 
@@ -404,7 +415,7 @@ public class ArticleQueryService {
         if (!locked && StringUtils.hasText(content)) {
             Long authorId = article.getAuthor() == null ? null : article.getAuthor().getId();
             content = secretBlockFilter.filter(
-                    content, article.getId(), currentUserService.getCurrentUserOrNull(), authorId);
+                    content, article.getId(), currentUserService.getCurrentUserOrNull(), authorId, article.getVersion());
             if(media!=null) content=media.decorate(article,content);
         }
         String summary = locked ? "" : SecretBlockFilter.safeSummary(article.getContent(),article.getSummary());

@@ -28,7 +28,13 @@ public class MusicApiClient {
     }
 
     public JsonNode get(String family, String key, String url, Duration ttl) {
+        return get(family, key, url, ttl, false);
+    }
+
+    /** A rejected media URL may expire before its cached resolution does. */
+    public JsonNode get(String family, String key, String url, Duration ttl, boolean refresh) {
         synchronized (locks.computeIfAbsent(family, ignored -> new Object())) {
+            if (refresh) synchronized (cache) { cache.remove(url); }
             return request(family, key, url, ttl);
         }
     }

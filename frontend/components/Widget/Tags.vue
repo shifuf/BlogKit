@@ -88,7 +88,7 @@ onMounted(async () => {
 .tag-filter-bar {
   width: 100%;
   padding: 0.4rem 1rem 0.4rem 0.7rem;
-  background: #fff;
+  background: var(--bg-card);
   border-radius: 12px;
   display: flex;
   white-space: nowrap;
@@ -96,7 +96,7 @@ onMounted(async () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
-  border: 1px solid #e3e8f7;
+  border: 1px solid var(--border-color);
   transition: 0.3s;
 }
 
@@ -121,12 +121,12 @@ onMounted(async () => {
   margin: 0.25rem;
   line-height: 1.6;
   border-radius: 8px;
-  color: #363636;
-  border: 1px solid #e3e8f7;
-  background: #fff;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  background: var(--bg-card);
 
   &--active {
-    background: #2583e8;
+    background: var(--theme-color);
     color: #fff;
   }
 }
@@ -140,14 +140,14 @@ onMounted(async () => {
 
 .tag-filter-bar__count {
   padding: 2px;
-  background: #fff;
-  border: 1px solid #e3e8f7;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
   min-width: 22.5px;
   display: inline-block;
   border-radius: 4px;
   text-align: center;
   font-size: 0.7rem;
-  color: #000;
+  color: var(--text-primary);
   margin-left: 4px;
 }
 </style>

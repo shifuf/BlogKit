@@ -74,6 +74,7 @@
         :pagination="pagination"
         :loading="loading || sorting"
         :custom-row="customRow"
+        :scroll="{ x: 1350 }"
         bordered
         @change="handleTableChange"
         :row-selection="{ selectedRowKeys, onChange: onSelectChange }"
@@ -169,8 +170,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue';
-import { message } from 'ant-design-vue';
+import { ref, reactive, computed, onMounted } from 'vue';
+import { Grid, message } from 'ant-design-vue';
 import { PlusOutlined, DeleteOutlined, MenuOutlined, UpOutlined, DownOutlined } from '@ant-design/icons-vue';
 import { getAdminCategoryList, deleteCategory, reorderCategories } from '@/api/Category';
 import { listSettings, saveSettingGroup } from '@/api/Settings';
@@ -192,7 +193,12 @@ const dragCell = record => ({
   onDragover: event => handleDragOver(record, event),
   onDrop: event => handleDrop(record, event)
 });
-const columns = [{
+const screens = Grid.useBreakpoint();
+const columns = computed(() => [{
+  title: '分类名称',
+  dataIndex: 'name',
+  width: 180
+}, {
   title: '',
   dataIndex: 'drag',
   width: 54,
@@ -202,10 +208,6 @@ const columns = [{
   dataIndex: 'id',
   width: 80,
   align: 'center'
-}, {
-  title: '分类名称',
-  dataIndex: 'name',
-  ellipsis: true
 }, {
   title: '层级',
   dataIndex: 'level',
@@ -229,6 +231,7 @@ const columns = [{
 }, {
   title: 'Slug',
   dataIndex: 'slug',
+  width: 160,
   ellipsis: true
 }, {
   title: '排序',
@@ -245,11 +248,11 @@ const columns = [{
   dataIndex: 'action',
   width: 220,
   align: 'center',
-  fixed: 'right'
+  fixed: screens.value.md ? 'right' : undefined
 }].map(column => ({
   ...column,
   customCell: dragCell
-}));
+})));
 const categoryList = ref([]);
 const allCategoryList = ref([]);
 const loading = ref(false);
@@ -519,6 +522,8 @@ onMounted(() => {
 
   .category-name {
     display: inline-block;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 
   .text-danger {

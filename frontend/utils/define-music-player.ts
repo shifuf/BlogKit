@@ -27,10 +27,10 @@ const HOST_CSS = `
   gap: 6px;
   padding: 22px 16px;
   border-radius: 26px;
-  background: #fff;
+  background: var(--bg-card, #fff);
   border: 1px solid rgba(15, 23, 42, .06);
   box-shadow: 0 16px 40px rgba(15, 23, 42, .08);
-  color: #6b7280;
+  color: var(--text-secondary, #6b7280);
   font-size: 12px;
 }
 .music-player-state__eq { display:flex; align-items:flex-end; gap:3px; height:14px; }
@@ -41,8 +41,8 @@ const HOST_CSS = `
   width:24px; height:24px; display:grid; place-items:center;
   border-radius:8px; border:1px solid #fecaca; background:#fef2f2; color:#dc2626; font-weight:800;
 }
-.music-player-state__title { color:#1f2937; font-size:13px; font-weight:700; }
-.music-player-state__desc { color:#6b7280; font-size:12px; }
+.music-player-state__title { color:var(--text-primary, #1f2937); font-size:13px; font-weight:700; }
+.music-player-state__desc { color:var(--text-secondary, #6b7280); font-size:12px; }
 .music-player-state--error { color:#dc2626; }
 @keyframes mp-eq { 0%,100%{transform:scaleY(.4);opacity:.55} 50%{transform:scaleY(1);opacity:1} }
 .mount { width: 100%; }

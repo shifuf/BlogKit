@@ -127,9 +127,9 @@ const copyCode = async (index: number) => {
   max-width: 100%;
   margin: 20px 0;
   padding: 18px 18px 16px;
-  border: 1px solid #eef0f3;
+  border: 1px solid var(--border-color);
   border-radius: 14px;
-  background: linear-gradient(180deg, #fafbfc 0%, #ffffff 100%);
+  background: linear-gradient(180deg, var(--bg-soft) 0%, var(--bg-card) 100%);
   box-shadow: 0 6px 20px rgba(15, 23, 42, 0.05);
 }
 .bd-download--dark {
@@ -153,7 +153,7 @@ const copyCode = async (index: number) => {
 .bd-download__title {
   font-size: 16px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
 }
 .bd-download--dark .bd-download__title {
   color: #e5e7eb;
@@ -162,7 +162,7 @@ const copyCode = async (index: number) => {
   margin: 10px 0 0;
   font-size: 13.5px;
   line-height: 1.6;
-  color: #6b7280;
+  color: var(--text-secondary);
   white-space: pre-wrap;
 }
 .bd-download__locked {
@@ -174,7 +174,7 @@ const copyCode = async (index: number) => {
   padding: 16px;
   border-radius: 10px;
   background: rgba(59, 130, 246, 0.06);
-  color: #6b7280;
+  color: var(--text-secondary);
   font-size: 14px;
 }
 .bd-download__unlock {
@@ -205,9 +205,9 @@ const copyCode = async (index: number) => {
   align-items: center;
   gap: 12px;
   padding: 12px;
-  border: 1px solid #eef0f3;
+  border: 1px solid var(--border-color);
   border-radius: 12px;
-  background: #fff;
+  background: var(--bg-card);
   cursor: pointer;
   text-align: left;
   transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.15s ease;
@@ -242,7 +242,7 @@ const copyCode = async (index: number) => {
   display: block;
   font-size: 14px;
   font-weight: 600;
-  color: #1f2937;
+  color: var(--text-primary);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -254,7 +254,7 @@ const copyCode = async (index: number) => {
   display: block;
   margin-top: 2px;
   font-size: 12px;
-  color: #9ca3af;
+  color: var(--text-tertiary);
 }
 .bd-download__copy {
   cursor: pointer;

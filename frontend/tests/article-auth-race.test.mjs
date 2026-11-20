@@ -8,7 +8,7 @@ import { ref, computed } from 'vue';
 const source = fs.readFileSync(new URL('../pages/article/[slug].vue', import.meta.url), 'utf8').match(/<script setup lang="ts">([\s\S]*?)<\/script>/)[1];
 const parsed = ts.createSourceFile('article.ts', source, ts.ScriptTarget.Latest, true);
 function pageRequests() {
-  const names = new Set(['detailRequestGeneration', 'unlockRequestGeneration', 'startDetailRequest', 'detailRequestIsCurrent', 'refreshDetailForAuth', 'submitUnlock']);
+  const names = new Set(['detailRequestGeneration', 'unlockRequestGeneration', 'startDetailRequest', 'detailRequestIsCurrent', 'refreshDetailForAuth', 'submitUnlock', 'unlockProtectedSection']);
   const declarations = parsed.statements.filter(statement => ts.isVariableStatement(statement) && statement.declarationList.declarations.some(declaration => names.has(declaration.name.getText(parsed))));
   const code = ts.transpileModule(declarations.map(statement => statement.getText(parsed)).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ESNext } }).outputText.replace(/import\.meta\.client/g, 'true').replace(/export \{\};?/g, '');
   const pending = [];
@@ -20,13 +20,19 @@ function pageRequests() {
     unlockPassword: ref('password'), unlocking: ref(false), toBlogArticle: detail => detail,
     ElMessage: { success() {}, error() {} },
     fetchArticleDetail() { return new Promise(resolve => pending.push(resolve)); },
-    unlockArticle() { return new Promise(resolve => pending.push(resolve)); }
+    unlockArticle() { return new Promise(resolve => pending.push(resolve)); },
+    unlockArticleSection() { return new Promise(resolve => pending.push(resolve)); },
+    startDetailRequest: () => ({ generation: context.detailRequestGeneration, id: context.articleId.value, slug: context.slug.value,
+      token: context.userStore.accessToken, tokenName: context.userStore.tokenName }),
+    detailRequestIsCurrent: request => request.generation === context.detailRequestGeneration && request.id === context.articleId.value
+      && request.slug === context.slug.value && request.token === context.userStore.accessToken && request.tokenName === context.userStore.tokenName,
+    detailRequestGeneration: 0
   };
   context.article = computed(() => context.pageData.value.article);
-  vm.runInNewContext(`${code}\nglobalThis.requests = { refreshDetailForAuth, submitUnlock };`, context);
+  vm.runInNewContext(`${code}\nglobalThis.requests = { refreshDetailForAuth, submitUnlock, unlockProtectedSection };`, context);
   return { ...context, pending };
 }
-for (const method of ['refreshDetailForAuth', 'submitUnlock']) {
+for (const method of ['refreshDetailForAuth', 'submitUnlock', 'unlockProtectedSection']) {
   test(`${method} cannot apply authorized response after logout`, async () => {
     const page = pageRequests();
     const request = page.requests[method]();

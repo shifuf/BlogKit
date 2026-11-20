@@ -129,7 +129,7 @@ watch(() => route.query.subscribe, value => {
 .site-footer__inner {
   width: min(1200px, calc(100vw - 32px));
   margin: 0 auto;
-  padding: 8px 0 24px;
+  padding: 8px env(safe-area-inset-right, 0px) calc(24px + env(safe-area-inset-bottom, 0px)) env(safe-area-inset-left, 0px);
 }
 .site-footer__top {
   display: grid;
@@ -231,6 +231,8 @@ watch(() => route.query.subscribe, value => {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  /* The fixed return button occupies the right edge at the end of the page. */
+  padding-inline-end: 64px;
   font-size: 12.5px;
   color: var(--text-tertiary, #64748b);
 }
@@ -239,6 +241,9 @@ watch(() => route.query.subscribe, value => {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .site-footer__dot {
   color: var(--text-muted, #cbd5e1);
@@ -247,6 +252,9 @@ watch(() => route.query.subscribe, value => {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
   color: var(--text-tertiary, #64748b);
   transition: color 0.18s ease;
 }
@@ -256,6 +264,7 @@ watch(() => route.query.subscribe, value => {
 .site-footer__beian img {
   width: 14px;
   height: 14px;
+  flex-shrink: 0;
 }
 html[data-theme='dark'] .site-footer {
   background:

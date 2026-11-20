@@ -8,16 +8,17 @@
       theme="light"
       :inline-collapsed="false"
       :items="items"
-      @select="handleSelect"
+      @click="handleSelect"
     >
     </a-menu>
   </div>
 </template>
 <script setup>
-import { reactive, h } from 'vue';
+import { reactive, h, onBeforeUnmount } from 'vue';
 import { useRouter } from 'vue-router';
 import { CloudUploadOutlined, DashboardOutlined, FileSyncOutlined, FolderOutlined, FormOutlined, LinkOutlined, MailOutlined, MessageOutlined, ReadOutlined, SafetyCertificateOutlined, ScheduleOutlined, SearchOutlined, SettingOutlined, StopOutlined, TagsOutlined, TeamOutlined, UnorderedListOutlined } from '@ant-design/icons-vue';
 const route = useRouter();
+const emit = defineEmits(['navigate']);
 const state = reactive({
   collapsed: false,
   selectedKeys: [],
@@ -124,6 +125,9 @@ const items = reactive([{
 const handleSelect = ({
   key
 }) => {
+  emit('navigate');
+  // Keep the editor's query (and unsaved page instance) when its menu is tapped again.
+  if (route.currentRoute.value.name === key) return;
   route.push({
     name: key
   });
@@ -145,7 +149,7 @@ const openKeysForRoute = name => {
 const currentKey = route.currentRoute.value.name;
 state.selectedKeys = [currentKey];
 state.openKeys = openKeysForRoute(currentKey);
-route.afterEach(to => {
+const stopRouteSync = route.afterEach(to => {
   state.selectedKeys = [to.name];
   // 切到分组子项时自动展开其分组；切到普通菜单时不强制改变展开态，避免「点其他菜单分组自动弹出」。
   const parent = parentByChild[to.name];
@@ -153,6 +157,7 @@ route.afterEach(to => {
     state.openKeys = [parent];
   }
 });
+onBeforeUnmount(stopRouteSync);
 </script>
 
 <style scoped lang="scss">

@@ -27,6 +27,7 @@ const {
   openDownload,
   toggleFavorite,
   unlockArticle,
+  unlockArticleSection,
   fetchReadingProgress,
   saveReadingProgress,
   fetchSeriesDetail
@@ -299,6 +300,14 @@ const lockedAction = (gate: string) => {
   }
   requireLogin('登录后可查看该内容');
 };
+const unlockProtectedSection = async (sectionId: string, password: string) => {
+  const request = startDetailRequest();
+  const response = await unlockArticleSection(request.id, sectionId, password);
+  if (!detailRequestIsCurrent(request)) return;
+  if (!response.success) throw new Error(response.message || '区块密码错误');
+  pageData.value = { ...pageData.value, article: toBlogArticle(response.data) };
+  currentDetailData.value = pageData.value;
+};
 const unmountBlocks = () => {
   while (mountedBlockApps.length) {
     mountedBlockApps.pop()?.unmount();
@@ -353,6 +362,8 @@ const enhanceBlocks = () => {
       const app = createApp(SecretBlock, {
         gate: original.gate,
         html: original.html,
+        sectionId: node.dataset.sectionId || '',
+        onUnlock: unlockProtectedSection,
         ...gateProps
       });
       app.mount(node);

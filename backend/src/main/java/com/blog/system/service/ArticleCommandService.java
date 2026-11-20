@@ -63,6 +63,7 @@ import java.util.regex.Pattern;
 
 @Service
 public class ArticleCommandService {
+    @org.springframework.beans.factory.annotation.Autowired private SecretSectionService secretSections;
     private final ArticleRepository articleRepository;
     private final ArticleCategoryRepository categoryRepository;
     private final ArticleTagRepository tagRepository;
@@ -684,7 +685,7 @@ public class ArticleCommandService {
         article.setTitle(request.title().trim());
         article.setSlug(resolveSlug(article.getId(), request));
         article.setSummary(resolveSummary(request));
-        article.setContent(request.content());
+        article.setContent(secretSections.prepareForSave(request.content()));
         applyCoverImage(article, request.coverImageUrl());
         article.setCategory(resolveCategory(request.categoryId()));
         article.setTags(resolveTags(request.tagIds()));

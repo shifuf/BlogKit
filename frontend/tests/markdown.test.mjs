@@ -12,6 +12,13 @@ test('markdown renderer keeps server-redacted secret empty',()=>{
   assert.match(html,/bd-block--secret/);
   assert.doesNotMatch(html,/restricted original/);
 });
+test('protected block renderer exposes only gate and opaque section id',()=>{
+  const html=renderMarkdown(':::bd-secret password section-3\n:::\n\n:::bd-secret users section-4\n:::');
+  assert.match(html,/data-gate="password"/);
+  assert.match(html,/data-section-id="section-3"/);
+  assert.match(html,/data-gate="users"/);
+  assert.doesNotMatch(html,/data-gate="password section-3"/);
+});
 
 test('SSR headings have stable unique anchors for navigation',()=>{
   const html=renderMarkdown('## Same\n\n## Same');

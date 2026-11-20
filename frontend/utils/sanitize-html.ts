@@ -69,7 +69,7 @@ export const ARTICLE_XSS_OPTIONS: IFilterXSSOptions = {
   whiteList: {
     ...xssDefaults.getDefaultWhiteList(),
     h1: ['id'], h2: ['id'], h3: ['id'], h4: ['id'], h5: ['id'], h6: ['id'],
-    div: ['class', 'data-token', 'data-gate'],
+    div: ['class', 'data-token', 'data-gate', 'data-section-id'],
     'music-player': [...MUSIC_PLAYER_ATTRS],
     figure: ['class'],
     figcaption: ['class'],

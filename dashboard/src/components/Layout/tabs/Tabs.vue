@@ -1,6 +1,23 @@
 <template>
-    <a-tabs v-model:activeKey="activeKey" hide-add type="editable-card" @edit="onEdit" @tabClick="tabClick">
+    <a-tabs :active-key="activeKey" hide-add type="editable-card" @edit="onEdit" @tabClick="tabClick">
     <a-tab-pane v-for="pane in panes" :key="pane.path" :tab="pane.title" :closable="pane.path !== '/'"></a-tab-pane>
+    <template #rightExtra>
+      <a-dropdown v-if="panes.length > 1" v-model:open="overflowOpen" :trigger="['click']" placement="bottomRight">
+        <a-button type="text" class="tabs-overflow-trigger" aria-label="更多标签页" aria-haspopup="menu" :aria-expanded="overflowOpen">
+          <ellipsis-outlined />
+        </a-button>
+        <template #overlay>
+          <a-menu :selected-keys="[activeKey]" class="tabs-overflow-menu" @click="selectOverflow">
+            <a-menu-item v-for="pane in panes" :key="pane.path">
+              <span class="tabs-overflow-title">{{ pane.title }}</span>
+              <a-button v-if="pane.path !== '/'" type="text" size="small" :aria-label="`关闭${pane.title}`" @click.stop="remove(pane.path)">
+                <close-outlined />
+              </a-button>
+            </a-menu-item>
+          </a-menu>
+        </template>
+      </a-dropdown>
+    </template>
   </a-tabs>
 </template>
 
@@ -8,6 +25,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useRouter } from 'vue-router';
+import { CloseOutlined, EllipsisOutlined } from '@ant-design/icons-vue';
 import { tabsStore } from '../../../stores/modules/tabs';
 const route = useRoute();
 const router = useRouter();
@@ -15,32 +33,20 @@ const store = tabsStore();
 const panes = computed(() => {
   return store.getTabs;
 });
-const activeKey = ref();
-const setActiveKey = () => {
-  activeKey.value = route.path;
-};
+const activeKey = computed(() => route.path);
+const overflowOpen = ref(false);
 const remove = targetKey => {
-  if (targetKey === '/') {
-    return;
-  }
-  let lastIndex = 0;
-  store.tabsList.forEach((pane, i) => {
-    if (pane.path === targetKey) {
-      lastIndex = i - 1;
-    }
-  });
-  store.tabsList = store.tabsList.filter(pane => pane.path !== targetKey);
-  if (lastIndex >= 0) {
-    activeKey.value = store.tabsList[lastIndex].path;
-  } else {
-    activeKey.value = store.tabsList[0].path;
-  }
-  router.push({
-    path: activeKey.value
-  });
+  if (targetKey === '/') return;
+  const index = store.tabsList.findIndex(pane => pane.path === targetKey);
+  if (index < 0) return;
+  store.tabsList.splice(index, 1);
+  if (targetKey !== route.path) return;
+  overflowOpen.value = false;
+  const next = store.tabsList[Math.max(0, index - 1)];
+  router.push(next ? next.fullPath || next.path : '/');
 };
-watch(() => route.path, () => {
-  setActiveKey();
+watch(() => route.fullPath, () => {
+  overflowOpen.value = false;
   addTab();
 });
 const beforeRefresh = () => {
@@ -57,8 +63,8 @@ const beforeRefresh = () => {
     }
   }
 };
-const onEdit = targetKey => {
-  remove(targetKey);
+const onEdit = (targetKey, action) => {
+  if (action === 'remove') remove(targetKey);
 };
 const addTab = () => {
   const {
@@ -67,17 +73,23 @@ const addTab = () => {
   } = route;
   const tab = {
     path: path,
+    fullPath: route.fullPath,
     title: meta.title
   };
   store.addTab(tab);
 };
 onMounted(() => {
   beforeRefresh();
-  setActiveKey();
   addTab();
 });
-const tabClick = kye => {
-  router.push(kye);
+const tabClick = key => {
+  if (key === route.path) return;
+  const pane = store.tabsList.find(tab => tab.path === key);
+  router.push(pane?.fullPath || key);
+};
+const selectOverflow = ({ key }) => {
+  overflowOpen.value = false;
+  tabClick(key);
 };
 </script>
 <style scoped lang="scss">
@@ -95,6 +107,27 @@ const tabClick = kye => {
 }
 :deep(.ant-tabs-nav-wrap) {
   align-items: center;
+}
+/* Ant 4's built-in overflow is hover-only; use its native click Dropdown above. */
+:deep(.ant-tabs-nav-operations) {
+  display: none !important;
+}
+.tabs-overflow-trigger {
+  min-width: 40px;
+}
+.tabs-overflow-menu {
+  max-height: min(60vh, 400px);
+  max-width: calc(100vw - 24px);
+  overflow-y: auto;
+}
+.tabs-overflow-menu :deep(.ant-dropdown-menu-title-content) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.tabs-overflow-title {
+  overflow-wrap: anywhere;
 }
 :deep(.ant-tabs-tab) {
   height: 32px;

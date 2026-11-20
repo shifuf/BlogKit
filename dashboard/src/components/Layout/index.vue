@@ -9,8 +9,10 @@
         :collapsed-width="0"
         @breakpoint="onBreakpoint"
       >
-        <MenuLogo></MenuLogo>
-        <menu-bar></menu-bar>
+        <template v-if="!collapsed">
+          <MenuLogo></MenuLogo>
+          <menu-bar @navigate="closeMobileSider"></menu-bar>
+        </template>
       </a-layout-sider>
       <!-- 窄屏抽屉式侧边栏的遮罩：点击关闭 -->
       <div v-if="!collapsed" class="asside-mask" @click="closeSider"></div>
@@ -34,22 +36,30 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import MenuBar from './menu/MenuBar.vue';
 import MenuLogo from './menu/MenuLogo.vue';
 import Header from './header/Header.vue';
 import { collapseStore } from '../../stores/modules/collapse.js';
 import Tabs from './tabs/Tabs.vue';
 const store = collapseStore();
+const route = useRoute();
+const isMobile = ref(false);
 const collapsed = computed({
   get: () => store.getCollapse,
   set: value => store.setCollapse(value)
 });
 // 窄屏(lg 以下)自动折叠侧边栏(收到 0 宽)，宽屏自动展开。
 const onBreakpoint = broken => {
+  isMobile.value = broken;
   store.setCollapse(broken);
 };
 const closeSider = () => store.setCollapse(true);
+const closeMobileSider = () => {
+  if (isMobile.value) closeSider();
+};
+watch(() => route.fullPath, closeMobileSider);
 </script>
 <style lang="scss" scoped>
 .layout{
