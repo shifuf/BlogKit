@@ -61,15 +61,15 @@
 ## Task 5: Integration and delivery
 - [x] Review all diffs; fresh independent review against approved spec; fix important findings with regressions.
 - [x] Run full frontend/dashboard/Maven tests, lint/typecheck and production builds. Serialize backend/frontend builds on constrained server.
-- [ ] Commit/push changes, encrypted production backup, capture app/data container baseline, stage source and tested jar under blog; build production frontend with Compose configuration.
-- [ ] Replace only backend/frontend; wait V19+Flyway validation and healthy services; verify DB/Redis IDs and mounts unchanged.
-- [ ] Verify real AI pass -> public, blocked/pending owner persists after reload, other same-name visitor cannot read, article/dynamic replies and platform searches/preview. Remove only controlled test records.
-- [ ] Sync docs/evidence, final commit/push, close SSH; report test and deployment results with material limitations.
+- [x] Commit/push changes, encrypted production backup, capture app/data container baseline, stage source and tested jar under blog; build production frontend with Compose configuration.
+- [x] Replace only backend/frontend; wait V19+Flyway validation and healthy services; verify DB/Redis IDs and mounts unchanged.
+- [x] Verify real AI pass -> public, blocked/pending owner persists after reload, other same-name visitor cannot read, article/dynamic replies and platform searches/preview. Remove only controlled test records.
+- [x] Sync docs/evidence, final commit/push, close SSH; report test and deployment results with material limitations.
 
 ## Integrated verification
 
 - Backend: 157 tests passed, zero failures/errors/skips, using isolated PostgreSQL17 for migrations, SQL jobs and JPA publication.
-- Frontend: 78 tests, lint (100 Vue components), typecheck and final Nuxt production build passed.
+- Frontend: 79 tests, lint (100 Vue components), typecheck and final Nuxt production build passed.
 - Dashboard: 49 tests, lint, typecheck and Vite production build passed.
 - Independent review reported four Important findings. Regressions first reproduced stale reply cursors, lost private preview replies, concurrent identity initialization and precommit email delivery; all now pass after coordinated refresh, browser bootstrap/Web Locks and after-commit idempotent email changes. No additional review pass requested.
 - Production encrypted backup prepared at `/www/wwwroot/blog/backups/physical/backup-20261120T155217Z`; local-only (`offsiteVerified=false`). Disposable test PostgreSQL stopped and tunnel closed before production build.
@@ -77,3 +77,7 @@
 ### Production reasoning-model adjustment
 
 The live configured model sometimes consumed the original 48-token cap in reasoning (`finish_reason=length`, no final content). A metadata-only probe confirmed strict JSON at128 tokens. The moderation call now reserves at most512 tokens while retaining strict boolean parsing and bounded retries. A new regression reproduced the empty-content behavior before the fix; full157-test real-PostgreSQL verification and package passed afterward. No AI setting, provider, key or model was changed.
+
+### Completed production acceptance — 2026-11-21
+
+Four real AI publications (article/dynamic roots/replies) passed after the bounded reasoning budget adjustment. Owner pending/rejected/spam reload persistence, same-name browser isolation and public counters passed. Final badge CSS compiler regression and actual 320/390px light/dark computed colors passed; full frontend79-test/lint/typecheck/build verification passed. QQ/NetEase search, resolve and platform UI passed; existing Kugou upstream502/503 remains explicitly unavailable. Public initial/nonzero byte ranges206 and real paused122s seek/resume passed. Four services healthy with original data containers/mounts. All14 controlled test comments, associated jobs and marked notifications removed; counters restored; acceptance session revoked. Full report: `docs/ops/2026-11-21-comment-ai-music-acceptance.md`.
