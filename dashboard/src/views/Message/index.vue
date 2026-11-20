@@ -99,6 +99,7 @@
               {{ statusMap[record.status]?.label || record.status || '已通过' }}
             </a-tag>
             <a-tag v-if="record.reported" color="magenta">举报 {{ record.reportCount || 1 }}</a-tag>
+            <a-tag v-if="record.visible === false">已隐藏</a-tag>
           </template>
           <template v-if="column.dataIndex === 'authorName'">
             <strong>{{ record.authorName }}</strong>
@@ -122,9 +123,9 @@
           </template>
           <template v-if="column.dataIndex === 'action'">
             <a-space>
+              <a v-if="record.status !== 'APPROVED'" @click="approveComment(record)">通过</a>
+              <a v-if="record.status !== 'REJECTED'" @click="rejectComment(record)">驳回</a>
               <template v-if="commentType === 'article'">
-                <a v-if="record.status !== 'APPROVED'" @click="approveComment(record)">通过</a>
-                <a v-if="record.status !== 'REJECTED'" @click="rejectComment(record)">驳回</a>
                 <a v-if="record.status !== 'SPAM'" class="danger-link" @click="spamComment(record)">垃圾</a>
                 <a v-if="!record.parentId && !record.pinned" @click="pinComment(record)">置顶</a>
                 <a v-if="!record.parentId && record.pinned" @click="unpinComment(record)">取消置顶</a>
@@ -217,7 +218,7 @@ import { computed, reactive, ref, onMounted, watch } from 'vue';
 import { message } from 'ant-design-vue';
 import {
   approveMessage, deleteMessage, getMessageList, rejectMessage, batchDeleteMessages,
-  getDynamicCommentList, deleteDynamicComment, batchDeleteDynamicComments,
+  getDynamicCommentList, deleteDynamicComment, batchDeleteDynamicComments, approveDynamicComment, rejectDynamicComment,
   getCommentSummary, markMessageSpam, batchUpdateMessageStatus, pinMessage, unpinMessage,
   replyMessage
 } from '@/api/Message';
@@ -268,10 +269,11 @@ const dynamicColumns = [
   { title: 'ID', dataIndex: 'id', width: 70, align: 'center' },
   { title: '类型', dataIndex: 'type', width: 70, align: 'center' },
   { title: '评论内容', dataIndex: 'content', ellipsis: true },
+  { title: '状态', dataIndex: 'status', width: 110, align: 'center' },
   { title: '用户', dataIndex: 'authorName', width: 150 },
   { title: '所属动态', dataIndex: 'dynamicSummary', width: 260 },
   { title: '创建时间', dataIndex: 'createdAt', width: 170, customRender: ({ text }) => formatDateTime(text) },
-  { title: '操作', dataIndex: 'action', width: 120, align: 'center', fixed: 'right' }
+  { title: '操作', dataIndex: 'action', width: 180, align: 'center', fixed: 'right' }
 ];
 const columns = computed(() => commentType.value === 'article' ? articleColumns : dynamicColumns);
 const statusOptions = [
@@ -453,12 +455,12 @@ const removeComment = async record => {
   await getList();
 };
 const approveComment = async record => {
-  await approveMessage(record.id);
+  await (commentType.value === 'dynamic' ? approveDynamicComment(record.id) : approveMessage(record.id));
   message.success('评论已通过');
   await getList();
 };
 const rejectComment = async record => {
-  await rejectMessage(record.id);
+  await (commentType.value === 'dynamic' ? rejectDynamicComment(record.id) : rejectMessage(record.id));
   message.success('评论已驳回');
   await getList();
 };

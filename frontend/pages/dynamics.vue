@@ -93,41 +93,43 @@
 
               <el-skeleton v-if="eng(item.id).loadingComments && !eng(item.id).comments.length" :rows="2" animated />
               <ul v-else-if="eng(item.id).comments.length" class="dc-list">
-                <li v-for="c in eng(item.id).comments" :key="c.id" class="dc-item" :class="{ 'dc-item--mine': isSelfDynamicComment(c.authorName) }">
+                <li v-for="c in eng(item.id).comments" :key="c.id" class="dc-item" :class="{ 'dc-item--mine': isSelfDynamicComment(c) }">
                   <div class="dc-item__avatar">{{ commentInitial(c.authorName) }}</div>
                   <div class="dc-item__body">
                     <div class="dc-item__head">
-                      <span class="dc-item__author" :class="{ 'dc-item__author--mine': isSelfDynamicComment(c.authorName) }">{{ c.authorName }}</span>
-                      <span v-if="isSelfDynamicComment(c.authorName)" class="dc-item__me">我</span>
+                      <span class="dc-item__author" :class="{ 'dc-item__author--mine': isSelfDynamicComment(c) }">{{ c.authorName }}</span>
+                      <span v-if="isSelfDynamicComment(c)" class="dc-item__me">我</span>
+                      <CommentStatusBadge :status="c.status" />
                       <span v-if="c.region" class="dc-item__region">{{ c.region }}</span>
                       <time class="dc-item__time" :datetime="c.createdAt" :title="absoluteTime(c.createdAt)">{{ relativeTime(c.createdAt) }}</time>
                     </div>
                     <div class="dc-item__text">{{ c.content }}</div>
                     <div class="dc-item__tools">
-                      <button type="button" class="dc-item__reply-btn" @click="openReply(item, c)">回复</button>
+                      <button v-if="isApprovedDynamicComment(c)" type="button" class="dc-item__reply-btn" @click="openReply(item, c)">回复</button>
                     </div>
 
                     <!-- 回复列表（一层缩进） -->
                     <ul v-if="c.replies && c.replies.length" class="dc-replies">
-                      <li v-for="r in c.replies" :key="r.id" class="dc-reply" :class="{ 'dc-item--mine': isSelfDynamicComment(r.authorName) }">
+                      <li v-for="r in c.replies" :key="r.id" class="dc-reply" :class="{ 'dc-item--mine': isSelfDynamicComment(r) }">
                         <div class="dc-reply__avatar">{{ commentInitial(r.authorName) }}</div>
                         <div class="dc-reply__body">
                           <div class="dc-item__head">
-                            <span class="dc-item__author" :class="{ 'dc-item__author--mine': isSelfDynamicComment(r.authorName) }">{{ r.authorName }}</span>
-                            <span v-if="isSelfDynamicComment(r.authorName)" class="dc-item__me">我</span>
+                            <span class="dc-item__author" :class="{ 'dc-item__author--mine': isSelfDynamicComment(r) }">{{ r.authorName }}</span>
+                            <span v-if="isSelfDynamicComment(r)" class="dc-item__me">我</span>
+                            <CommentStatusBadge :status="r.status" />
                             <span v-if="r.replyTo" class="dc-reply__to">回复 @{{ r.replyTo }}</span>
                             <span v-if="r.region" class="dc-item__region">{{ r.region }}</span>
                             <time class="dc-item__time" :datetime="r.createdAt" :title="absoluteTime(r.createdAt)">{{ relativeTime(r.createdAt) }}</time>
                           </div>
                           <div class="dc-item__text">{{ r.content }}</div>
                           <div class="dc-item__tools">
-                            <button type="button" class="dc-item__reply-btn" @click="openReply(item, r, c)">回复</button>
+                            <button v-if="isApprovedDynamicComment(c) && isApprovedDynamicComment(r)" type="button" class="dc-item__reply-btn" @click="openReply(item, r, c)">回复</button>
                           </div>
                         </div>
                       </li>
                     </ul>
 
-                    <button v-if="(c.replies?.length || 0) < (c.replyCount || 0)" type="button" @click="loadDynamicReplies(item, c)">加载更多回复</button>
+                    <button v-if="hasMoreDynamicReplies(c)" type="button" :disabled="dynamicReplyLoading.has(c.id)" @click="loadDynamicReplies(item, c)">加载更多回复</button>
                     <!-- 回复输入框：每个根评论下一个，回复根或其下回复时都在此显示 -->
                     <div v-if="eng(item.id).reply.rootId === c.id" class="dc-reply-form">
                       <input
@@ -183,9 +185,12 @@ import type { DynamicPost, DynamicComment } from '~/types/blog';
 import { formatDateTime, formatRelativeTime } from '~/utils/date';
 import { getGuestKey } from '~/utils/blog-blocks';
 import { buildAvatarUrl } from '~/utils/blog-adapter';
+import CommentStatusBadge from '~/components/blog/CommentStatusBadge.vue';
+const userStore = useStore.user();
 const {
   fetchDynamics,
   toggleDynamicLike,
+  fetchDynamicLikeStatus,
   fetchDynamicComments,
   fetchDynamicReplies,
   postDynamicComment
@@ -478,6 +483,9 @@ interface MomentEngagement {
   form: { authorName: string; content: string };
   submitting: boolean;
   reply: ReplyState;
+  generation: number;
+  commentRequest: number;
+  pollAttempts: number;
 }
 const COMMENT_PAGE_SIZE = 5;
 const GUEST_PROFILE_KEY = 'bd-guest-comment-profile';
@@ -497,7 +505,6 @@ const saveGuestAuthor = (name: string) => {
   const author = name.trim().slice(0, 64);
   if (!author) return;
   try {
-    const prev = readGuestAuthor();
     // 尽量保留文章评论里已有的邮箱/网站字段
     let email = '';
     let website = '';
@@ -516,10 +523,8 @@ const saveGuestAuthor = (name: string) => {
   }
 };
 const rememberedGuestName = ref('');
-const isSelfDynamicComment = (authorName?: string) => {
-  const mine = (rememberedGuestName.value || '').trim();
-  return Boolean(mine) && String(authorName || '').trim() === mine;
-};
+const isSelfDynamicComment = (comment: DynamicComment) => comment.mine === true;
+const isApprovedDynamicComment = (comment: DynamicComment) => !comment.status || comment.status === 'APPROVED';
 const newReplyState = (): ReplyState => ({ rootId: null, targetId: null, targetName: '', authorName: '', content: '', submitting: false });
 const engagement = reactive<Record<number, MomentEngagement>>({});
 const ensureEngagement = (item: DynamicPost) => {
@@ -535,12 +540,124 @@ const ensureEngagement = (item: DynamicPost) => {
       commentsTotal: 0,
       form: { authorName: rememberedGuestName.value || '', content: '' },
       submitting: false,
-      reply: newReplyState()
+      reply: newReplyState(),
+      generation: 0,
+      commentRequest: 0,
+      pollAttempts: 0
     };
   }
   return engagement[item.id]!;
 };
 const eng = (id: number) => engagement[id]!;
+const dynamicReplyPages = ref<Record<number, number>>({});
+const dynamicReplyTotals = ref<Record<number, number>>({});
+const dynamicReplyLoading = reactive(new Set<number>());
+const dynamicPollTimers = new Map<number, ReturnType<typeof setTimeout>>();
+const dynamicControllers = new Map<number, Set<AbortController>>();
+let dynamicCommentsDisposed = false;
+const dynamicIdentity = () => `${userStore.tokenName || ''}:${userStore.accessToken || ''}`;
+const captureDynamicContext = (state: MomentEngagement) => ({ generation: state.generation, identity: dynamicIdentity() });
+const dynamicContextCurrent = (state: MomentEngagement, context: ReturnType<typeof captureDynamicContext>) =>
+  !dynamicCommentsDisposed && state.open && state.generation === context.generation && context.identity === dynamicIdentity();
+const clearDynamicPoll = (id: number) => {
+  const timer = dynamicPollTimers.get(id);
+  if (timer !== undefined) clearTimeout(timer);
+  dynamicPollTimers.delete(id);
+};
+const beginDynamicRequest = (id: number) => {
+  const controller = new AbortController();
+  if (!dynamicControllers.has(id)) dynamicControllers.set(id, new Set());
+  dynamicControllers.get(id)!.add(controller);
+  return controller;
+};
+const finishDynamicRequest = (id: number, controller: AbortController) => dynamicControllers.get(id)?.delete(controller);
+const invalidateDynamicComments = (id: number) => {
+  const state = engagement[id];
+  if (!state) return;
+  state.generation += 1;
+  state.loadingComments = false;
+  state.submitting = false;
+  state.reply.submitting = false;
+  clearDynamicPoll(id);
+  dynamicControllers.get(id)?.forEach(controller => controller.abort());
+  dynamicControllers.delete(id);
+  state.comments.forEach(root => dynamicReplyLoading.delete(root.id));
+};
+const mergeDynamicComments = (existing: DynamicComment[], incoming: DynamicComment[]): DynamicComment[] => {
+  const byId = new Map(existing.map(comment => [comment.id, comment]));
+  for (const comment of incoming) {
+    const previous = byId.get(comment.id);
+    byId.set(comment.id, previous ? { ...previous, ...comment, replies: mergeDynamicComments(previous.replies || [], comment.replies || []) } : comment);
+  }
+  return [...byId.values()];
+};
+const hasOwnPendingDynamicComment = (state: MomentEngagement) => state.comments.some(root =>
+  (root.mine && root.status === 'PENDING') || root.replies?.some(reply => reply.mine && reply.status === 'PENDING'));
+const hasMoreDynamicReplies = (root: DynamicComment) => dynamicReplyTotals.value[root.id] !== undefined
+  ? (root.replies?.length || 0) < dynamicReplyTotals.value[root.id]!
+  : (root.replies?.filter(isApprovedDynamicComment).length || 0) < (root.replyCount || 0) || (root.replies?.length || 0) >= 2;
+const dynamicStatusSnapshot = (state: MomentEngagement) => {
+  const statuses = new Map<number, boolean>();
+  for (const root of state.comments) {
+    const publicRoot = isApprovedDynamicComment(root);
+    statuses.set(root.id, publicRoot);
+    for (const reply of root.replies || []) statuses.set(reply.id, publicRoot && isApprovedDynamicComment(reply));
+  }
+  return statuses;
+};
+const applyDynamicStatusCounts = (state: MomentEngagement, before: Map<number, boolean>) => {
+  for (const [id, approved] of dynamicStatusSnapshot(state)) {
+    if (before.has(id) && before.get(id) !== approved) state.commentCount = Math.max(0, state.commentCount + (approved ? 1 : -1));
+  }
+};
+const scheduleDynamicPoll = (item: DynamicPost) => {
+  const state = ensureEngagement(item);
+  clearDynamicPoll(item.id);
+  if (!import.meta.client || dynamicCommentsDisposed || !state.open || state.pollAttempts >= 36 || !hasOwnPendingDynamicComment(state)) return;
+  dynamicPollTimers.set(item.id, setTimeout(async () => {
+    dynamicPollTimers.delete(item.id);
+    state.pollAttempts += 1;
+    await pollDynamicComments(item);
+    scheduleDynamicPoll(item);
+  }, 5000));
+};
+const pollDynamicComments = async (item: DynamicPost) => {
+  const state = ensureEngagement(item);
+  if (state.loadingComments || dynamicReplyLoading.size) return;
+  const context = captureDynamicContext(state);
+  const request = ++state.commentRequest;
+  const controller = beginDynamicRequest(item.id);
+  const before = dynamicStatusSnapshot(state);
+  state.loadingComments = true;
+  try {
+    const pages = await Promise.all(Array.from({ length: Math.max(1, state.commentsPage) }, (_, page) =>
+      fetchDynamicComments(item.id, page, COMMENT_PAGE_SIZE, controller.signal)));
+    if (!dynamicContextCurrent(state, context) || request !== state.commentRequest || pages.some(page => !page.success)) return;
+    const refreshed = mergeDynamicComments([], pages.flatMap(page => page.data.items));
+    for (const root of refreshed) {
+      const previous = state.comments.find(comment => comment.id === root.id);
+      if (!previous || (!dynamicReplyPages.value[root.id] && !previous.replies?.some(reply => reply.mine && reply.status === 'PENDING'))) continue;
+      const replyPages = await Promise.all(Array.from({ length: Math.max(1, Math.ceil((previous.replies?.length || 0) / 10)) }, (_, page) =>
+        fetchDynamicReplies(item.id, root.id, page, 10, controller.signal)));
+      if (!dynamicContextCurrent(state, context) || request !== state.commentRequest) return;
+      if (replyPages.every(page => page.success)) {
+        root.replies = mergeDynamicComments(root.replies || [], replyPages.flatMap(page => page.data.items));
+        dynamicReplyPages.value[root.id] = replyPages.length;
+        dynamicReplyTotals.value[root.id] = replyPages[0]!.data.totalItems;
+      }
+    }
+    const publicStatus = await fetchDynamicLikeStatus(item.id, getGuestKey(), controller.signal).catch(() => null);
+    if (!dynamicContextCurrent(state, context) || request !== state.commentRequest) return;
+    state.comments = refreshed;
+    state.commentsTotal = pages[0]!.data.totalItems;
+    applyDynamicStatusCounts(state, before);
+    if (publicStatus?.success && Number.isFinite(publicStatus.data.commentCount)) state.commentCount = publicStatus.data.commentCount;
+  } catch { /* A failed refresh keeps the current view; the bounded poll can retry. */ }
+  finally {
+    finishDynamicRequest(item.id, controller);
+    if (dynamicContextCurrent(state, context) && request === state.commentRequest) state.loadingComments = false;
+  }
+};
 // 评论头像首字母（与文章评论 initial() 一致的观感）。
 const commentInitial = (name?: string) => {
   const text = String(name || '').trim();
@@ -558,69 +675,104 @@ const toggleLike = async (item: DynamicPost) => {
 };
 const loadComments = async (item: DynamicPost, append = false) => {
   const state = ensureEngagement(item);
-  if (state.loadingComments) return;
+  if (state.loadingComments || !state.open || dynamicCommentsDisposed) return;
+  const context = captureDynamicContext(state);
+  const request = ++state.commentRequest;
+  const controller = beginDynamicRequest(item.id);
   state.loadingComments = true;
   const page = append ? state.commentsPage : 0;
   try {
-    const res = await fetchDynamicComments(item.id, page, COMMENT_PAGE_SIZE);
-    if (res.success) {
+    const res = await fetchDynamicComments(item.id, page, COMMENT_PAGE_SIZE, controller.signal);
+    if (res.success && dynamicContextCurrent(state, context) && request === state.commentRequest) {
       const data = res.data;
-      state.comments = append ? [...state.comments, ...data.items] : data.items;
+      const before = dynamicStatusSnapshot(state);
+      state.comments = append ? mergeDynamicComments(state.comments, data.items) : mergeDynamicComments([], data.items);
+      applyDynamicStatusCounts(state, before);
       state.commentsTotal = data.totalItems ?? state.comments.length;
       state.commentsPage = page + 1;
     }
   } catch {} finally {
-    state.loadingComments = false;
+    finishDynamicRequest(item.id, controller);
+    if (dynamicContextCurrent(state, context) && request === state.commentRequest) {
+      state.loadingComments = false;
+      scheduleDynamicPoll(item);
+    }
   }
 };
-const dynamicReplyPages = ref<Record<number, number>>({});
-const dynamicReplyLoading = new Set<number>();
 const loadDynamicReplies = async (item: DynamicPost, root: DynamicComment) => {
-  if (dynamicReplyLoading.has(root.id)) return;
+  const state = ensureEngagement(item);
+  if (!state.open || dynamicCommentsDisposed || dynamicReplyLoading.has(root.id)) return;
+  const context = captureDynamicContext(state);
+  const controller = beginDynamicRequest(item.id);
   dynamicReplyLoading.add(root.id);
   try {
     const page = dynamicReplyPages.value[root.id] || 0;
-    const response = await fetchDynamicReplies(item.id, root.id, page, 10);
-    if (response.success) {
-      root.replies = page ? [...(root.replies || []), ...response.data.items] : response.data.items;
-      root.replyCount = response.data.totalItems;
+    const response = await fetchDynamicReplies(item.id, root.id, page, 10, controller.signal);
+    if (response.success && dynamicContextCurrent(state, context) && state.comments.find(comment => comment.id === root.id) === root) {
+      const before = dynamicStatusSnapshot(state);
+      const previousReplies = new Map((root.replies || []).map(reply => [reply.id, isApprovedDynamicComment(reply)]));
+      root.replies = mergeDynamicComments(root.replies || [], response.data.items);
+      for (const reply of root.replies) {
+        const approved = isApprovedDynamicComment(reply);
+        if (previousReplies.has(reply.id) && previousReplies.get(reply.id) !== approved) {
+          root.replyCount = Math.max(0, (root.replyCount || 0) + (approved ? 1 : -1));
+        }
+      }
+      applyDynamicStatusCounts(state, before);
+      dynamicReplyTotals.value[root.id] = response.data.totalItems;
       dynamicReplyPages.value[root.id] = page + 1;
     }
-  } finally { dynamicReplyLoading.delete(root.id); }
+  } catch {} finally {
+    finishDynamicRequest(item.id, controller);
+    if (dynamicContextCurrent(state, context)) {
+      dynamicReplyLoading.delete(root.id);
+      scheduleDynamicPoll(item);
+    }
+  }
 };
 const loadMoreComments = (item: DynamicPost) => loadComments(item, true);
 const toggleComments = async (item: DynamicPost) => {
   const state = ensureEngagement(item);
   state.open = !state.open;
-  if (state.open && !state.comments.length) {
+  if (!state.open) {
+    invalidateDynamicComments(item.id);
+  } else {
+    state.pollAttempts = 0;
+    state.comments.forEach(root => { delete dynamicReplyPages.value[root.id]; delete dynamicReplyTotals.value[root.id]; });
     await loadComments(item, false);
   }
 };
 const submitComment = async (item: DynamicPost) => {
   const state = ensureEngagement(item);
   const content = state.form.content.trim();
-  if (!content || state.submitting) return;
+  if (!content || state.submitting || !state.open || dynamicCommentsDisposed) return;
+  const context = captureDynamicContext(state);
+  const draft = state.form.content;
   state.submitting = true;
   try {
     const res = await postDynamicComment(item.id, {
       authorName: state.form.authorName.trim() || '游客',
-      content,
-      guestKey: getGuestKey()
+      content
     });
-    if (res.success) {
-      state.comments = [{ ...res.data, replies: [] }, ...state.comments];
-      state.commentCount += 1;
+    if (res.success && dynamicContextCurrent(state, context)) {
+      state.commentRequest += 1;
+      state.loadingComments = false;
+      state.comments = mergeDynamicComments([{ ...res.data, replies: [] }], state.comments.filter(comment => comment.id !== res.data.id));
+      if (isApprovedDynamicComment(res.data)) state.commentCount += 1;
       state.commentsTotal += 1;
       saveGuestAuthor(state.form.authorName);
-      state.form.content = '';
+      if (state.form.content === draft) state.form.content = '';
+      state.pollAttempts = 0;
+      scheduleDynamicPoll(item);
     }
   } catch {} finally {
-    state.submitting = false;
+    if (dynamicContextCurrent(state, context)) state.submitting = false;
   }
 };
 // root：被回复评论所属的根评论；target：被回复对象（可为根或某条回复）。
 const openReply = (item: DynamicPost, target: DynamicComment, root?: DynamicComment) => {
   const state = ensureEngagement(item);
+  if (!isApprovedDynamicComment(target) || (root && !isApprovedDynamicComment(root))) return;
   const rootId = root ? root.id : (target.parentId ?? target.id);
   if (!state.form.authorName && rememberedGuestName.value) {
     state.form.authorName = rememberedGuestName.value;
@@ -640,30 +792,52 @@ const submitReply = async (item: DynamicPost) => {
   const state = ensureEngagement(item);
   const reply = state.reply;
   const content = reply.content.trim();
-  if (!content || reply.submitting || !reply.targetId) return;
+  if (!content || reply.submitting || !reply.targetId || !state.open || dynamicCommentsDisposed) return;
+  const context = captureDynamicContext(state);
   reply.submitting = true;
   try {
     const res = await postDynamicComment(item.id, {
       authorName: reply.authorName.trim() || '游客',
       content,
-      guestKey: getGuestKey(),
       parentId: reply.targetId
     });
-    if (res.success) {
+    if (res.success && dynamicContextCurrent(state, context)) {
+      state.commentRequest += 1;
+      state.loadingComments = false;
       const root = state.comments.find(c => c.id === reply.rootId);
       if (root) {
-        root.replies = [...(root.replies || []), res.data];
-        root.replyCount = (root.replyCount || 0) + 1;
+        root.replies = mergeDynamicComments(root.replies || [], [res.data]);
+        if (isApprovedDynamicComment(res.data)) root.replyCount = (root.replyCount || 0) + 1;
+        if (dynamicReplyTotals.value[root.id] !== undefined) dynamicReplyTotals.value[root.id]! += 1;
       }
-      state.commentCount += 1;
+      if (isApprovedDynamicComment(res.data)) state.commentCount += 1;
       saveGuestAuthor(reply.authorName);
       state.form.authorName = reply.authorName.trim() || state.form.authorName;
-      state.reply = newReplyState();
+      if (state.reply === reply && state.reply.content.trim() === content) state.reply = newReplyState();
+      state.pollAttempts = 0;
+      scheduleDynamicPoll(item);
     }
   } catch {} finally {
     reply.submitting = false;
   }
 };
+watch(() => [userStore.accessToken, userStore.tokenName], () => {
+  Object.entries(engagement).forEach(([key, state]) => {
+    const id = Number(key);
+    invalidateDynamicComments(id);
+    state.comments.forEach(root => { delete dynamicReplyPages.value[root.id]; delete dynamicReplyTotals.value[root.id]; });
+    state.comments = [];
+    state.commentsPage = 0;
+    state.commentsTotal = 0;
+    state.reply = newReplyState();
+    state.pollAttempts = 0;
+    if (state.open) void loadComments({ id } as DynamicPost);
+  });
+}, { flush: 'sync' });
+onBeforeUnmount(() => {
+  dynamicCommentsDisposed = true;
+  Object.keys(engagement).forEach(key => invalidateDynamicComments(Number(key)));
+});
 // 首屏列表改为 SSR 期 fetch（useAsyncData）：服务端直出 HTML，配合 routeRules 的 swr:30 让 nitro 缓存真正命中、首屏不再闪空壳。
 // 注意：回调内只做纯 $fetch，不碰 window/localStorage/AMap，保证 SSR 不报错。
 const { data: initialDynamics } = await useAsyncData('dynamics-list', async () => {
@@ -1103,12 +1277,14 @@ onMounted(async () => {
 }
 .dc-item__head {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 8px;
   margin-bottom: 2px;
 }
 .dc-item__author {
+  overflow-wrap: anywhere;
   font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-highlight-color);
@@ -1134,6 +1310,7 @@ onMounted(async () => {
   background: color-mix(in srgb, var(--theme-color, #409eff) 6%, transparent);
 }
 .dc-item__time {
+  margin-left: auto;
   flex: 0 0 auto;
   font-size: 0.72rem;
   color: var(--text-muted, #909399);

@@ -95,6 +95,12 @@ export function deleteDynamicComment(id) {
     method: 'delete'
   });
 }
+export function approveDynamicComment(id) {
+  return request({ url: `/admin/dynamic-comments/${id}/approve`, method: 'post' });
+}
+export function rejectDynamicComment(id) {
+  return request({ url: `/admin/dynamic-comments/${id}/reject`, method: 'post' });
+}
 export function batchDeleteDynamicComments(ids) {
   return request({
     url: '/admin/dynamic-comments/batch-delete',

@@ -13,10 +13,12 @@ public record DynamicCommentResponse(
         String replyTo,
         String region,
         long replyCount,
-        List<DynamicCommentResponse> replies
+        List<DynamicCommentResponse> replies,
+        String status,
+        boolean mine
 ) {
     /** 简易构造：无回复的扁平评论。 */
     public static DynamicCommentResponse flat(Long id, String authorName, String content, OffsetDateTime createdAt) {
-        return new DynamicCommentResponse(id, authorName, content, createdAt, null, null, null, 0, List.of());
+        return new DynamicCommentResponse(id, authorName, content, createdAt, null, null, null, 0, List.of(), "APPROVED", false);
     }
 }

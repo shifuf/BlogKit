@@ -24,6 +24,8 @@ import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 
 import java.util.LinkedHashMap;
@@ -48,6 +50,9 @@ public class CommentService {
     private final NotificationService notificationService;
     private final ExternalNotificationService externalNotificationService;
     private final ArticleQueryService articleQueryService;
+    private final GuestCommentIdentity guestIdentity;
+    private final CommentModerationPolicy moderationPolicy;
+    private final CommentModerationJobs moderationJobs;
     private final String publicSiteUrl;
 
     public CommentService(
@@ -60,6 +65,9 @@ public class CommentService {
             NotificationService notificationService,
             ExternalNotificationService externalNotificationService,
             ArticleQueryService articleQueryService,
+            GuestCommentIdentity guestIdentity,
+            CommentModerationPolicy moderationPolicy,
+            CommentModerationJobs moderationJobs,
             @Value("${blog.public-site-url:}") String publicSiteUrl
     ) {
         this.commentRepository = commentRepository;
@@ -71,6 +79,9 @@ public class CommentService {
         this.notificationService = notificationService;
         this.externalNotificationService = externalNotificationService;
         this.articleQueryService = articleQueryService;
+        this.guestIdentity = guestIdentity;
+        this.moderationPolicy = moderationPolicy;
+        this.moderationJobs = moderationJobs;
         this.publicSiteUrl = stripTrailingSlash(publicSiteUrl);
     }
 
@@ -92,14 +103,16 @@ public class CommentService {
         if (!article.isCommentsEnabled()) {
             return new PageResponse<>(List.of(), pageable.getPageNumber(), pageable.getPageSize(), 0, 0);
         }
-        var comments = commentRepository.findApprovedRootComments(articleId, ArticleCommentStatus.APPROVED, pageable);
+        Long viewerId = guestIdentity.currentUserId();
+        String viewerHash = viewerId == null ? guestIdentity.currentHash() : null;
+        var comments = commentRepository.findVisibleRootComments(articleId, viewerId, viewerHash, pageable);
         List<ArticleComment> rootComments = comments.getContent();
         List<Long> rootIds = rootComments.stream().map(ArticleComment::getId).toList();
         // Bound the preview per thread; the dedicated endpoint loads further replies.
         Map<Long, List<ArticleComment>> repliesByParentId = new LinkedHashMap<>();
         for (Long rootId : rootIds) {
-            repliesByParentId.put(rootId, commentRepository.findApprovedReplies(rootId,
-                    ArticleCommentStatus.APPROVED, PageRequest.of(0, 2)).getContent());
+            repliesByParentId.put(rootId, commentRepository.findVisibleReplies(rootId,
+                    viewerId, viewerHash, PageRequest.of(0, 2)).getContent());
         }
         Set<Long> likedCommentIds = findLikedCommentIds(rootComments, repliesByParentId);
         return new PageResponse<>(
@@ -125,10 +138,12 @@ public class CommentService {
                 .orElseThrow(() -> new BusinessException("评论不存在"));
         Article article = requireCommentableArticle(target.getArticle().getId());
         requireArticleCommentsEnabled(article);
-        requireVisibleComment(target);
+        requireReadableComment(target);
         ArticleComment root = rootOf(target);
         var pageable = PageRequest.of(Math.max(0, page), Math.min(50, Math.max(1, size)));
-        var replies = commentRepository.findApprovedReplies(root.getId(), ArticleCommentStatus.APPROVED, pageable);
+        Long viewerId = guestIdentity.currentUserId();
+        var replies = commentRepository.findVisibleReplies(root.getId(), viewerId,
+                viewerId == null ? guestIdentity.currentHash() : null, pageable);
         Set<Long> liked = findLikedCommentIds(List.of(), Map.of(root.getId(), replies.getContent()));
         return new PageResponse<>(replies.getContent().stream().map(c -> toResponse(c, liked, List.of())).toList(),
                 replies.getNumber(), replies.getSize(), replies.getTotalElements(), replies.getTotalPages());
@@ -140,6 +155,8 @@ public class CommentService {
     @Transactional
     public CommentResponse createComment(CommentCreateRequest request, String region) {
         UserAccount currentUser = currentUserService.getCurrentUserOrNull();
+        articleRepository.findLockedById(request.articleId())
+                .orElseThrow(() -> new BusinessException("文章不存在"));
         Article article = requireCommentableArticle(request.articleId());
         requireArticleCommentsEnabled(article);
         ArticleComment target = resolveParentComment(request.parentId(), article.getId());
@@ -150,7 +167,7 @@ public class CommentService {
         if (!StringUtils.hasText(safeContent)) {
             throw new BusinessException("评论内容不能为空");
         }
-        ArticleCommentStatus status = resolveInitialStatus(safeContent);
+        ArticleCommentStatus status = moderationPolicy.initialStatus(safeContent);
         ArticleComment comment = new ArticleComment();
         comment.setArticle(article);
         comment.setParent(parent);
@@ -159,7 +176,7 @@ public class CommentService {
         comment.setStatus(status);
         // region 已在事务外解析，此处仅落库。
         comment.setRegion(StringUtils.hasText(region) ? region : null);
-        if (currentUser != null) {
+        if (currentUser != null && !GUEST_USERNAME.equals(currentUser.getUsername())) {
             comment.setAuthor(currentUser);
         } else {
             // 游客评论：author 指向系统游客账号，真实昵称/邮箱/网站存 guest 字段。
@@ -167,6 +184,7 @@ public class CommentService {
                 throw new BusinessException("请填写昵称");
             }
             comment.setAuthor(resolveGuestAccount());
+            comment.setGuestIdentityHash(guestIdentity.currentHash());
             comment.setGuestName(HtmlSanitizer.cleanText(request.guestName(), 64));
             if (StringUtils.hasText(request.guestEmail())) {
                 String cleanedEmail = HtmlSanitizer.cleanText(request.guestEmail(), 128);
@@ -214,6 +232,9 @@ public class CommentService {
             }
         }
         ArticleComment saved = commentRepository.save(comment);
+        if (status == ArticleCommentStatus.PENDING && moderationPolicy.aiEnabled()) {
+            moderationJobs.enqueue("ARTICLE", saved.getId());
+        }
         notifyCommentCreated(saved, currentUser);
         return toResponse(saved, Set.of(), List.of());
     }
@@ -238,7 +259,8 @@ public class CommentService {
         ArticleComment target = replyTarget(comment);
         UserAccount recipient = target == null ? article.getAuthor() : target.getAuthor();
         boolean guestRecipient = recipient == null || GUEST_USERNAME.equals(recipient.getUsername());
-        if (!guestRecipient && (actor == null || !recipient.getId().equals(actor.getId()))) {
+        if (comment.getStatus() == ArticleCommentStatus.APPROVED && !guestRecipient
+                && (actor == null || !recipient.getId().equals(actor.getId()))) {
             String title = comment.getParent() == null ? "文章收到新评论" : "你的评论收到回复";
             notificationService.create(recipient, "COMMENT_REPLY", title,
                     actorName + "：" + truncate(comment.getContent(), 160),
@@ -317,23 +339,25 @@ public class CommentService {
         vars.put("replySnippetHtml", HtmlSanitizer.escape(replySnippet).replace("\n", "<br>"));
         vars.put("viewUrl", viewUrl);
         vars.put("unsubscribeUrl", unsubscribeUrl);
-        log.info("评论回复邮件发送中 to={} parentId={} replyId={} articleId={} title={} url={}",
-                to, parent.getId(), comment.getId(), article.getId(), articleTitle, viewUrl);
         // 优先后台配置的消息平台模板（默认 comment_reply）；失败回退内置 HTML
         String html = buildReplyEmailHtml(siteName, articleTitle, actorName, parentSnippet, replySnippet, viewUrl, unsubscribeUrl);
-        String err = externalNotificationService.sendTemplatedEmail(
-                to,
-                "templateCommentReply",
-                "comment_reply",
-                subject,
-                plain,
-                html,
-                vars
-        );
-        if (err != null) {
-            log.warn("评论回复邮件未发出 to={} err={}", to, err);
+        String deliveryKey = "blog-comment-reply:" + comment.getId();
+        Runnable deliver = () -> {
+            try {
+                String err = externalNotificationService.sendIdempotentTemplatedEmail(to, "templateCommentReply",
+                        "comment_reply", subject, plain, html, vars, deliveryKey);
+                if (err != null) log.warn("评论回复邮件未发出 deliveryKey={}", deliveryKey);
+                else log.info("评论回复邮件已提交 deliveryKey={}", deliveryKey);
+            } catch (Exception ex) {
+                log.warn("评论回复邮件调用失败 deliveryKey={} type={}", deliveryKey, ex.getClass().getSimpleName());
+            }
+        };
+        if (TransactionSynchronizationManager.isSynchronizationActive() && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override public void afterCommit() { deliver.run(); }
+            });
         } else {
-            log.info("评论回复邮件已提交 to={} parentId={} url={}", to, parent.getId(), viewUrl);
+            deliver.run();
         }
     }
 
@@ -347,8 +371,7 @@ public class CommentService {
         if (!expected.equalsIgnoreCase(token.trim())) {
             throw new BusinessException("退订链接无效或已失效");
         }
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         String bound = resolveNotifyEmail(comment, null);
         if (!StringUtils.hasText(bound) || !bound.equalsIgnoreCase(email.trim())) {
             throw new BusinessException("邮箱与评论不匹配");
@@ -526,8 +549,7 @@ public class CommentService {
     @Transactional
     public CommentResponse toggleCommentLike(Long commentId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         requireCommentableArticle(comment.getArticle().getId());
         requireVisibleComment(comment);
         requireArticleCommentsEnabled(comment.getArticle());
@@ -601,8 +623,7 @@ public class CommentService {
     public void deleteComment(Long commentId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         deleteCommentTree(comment);
     }
 
@@ -611,16 +632,12 @@ public class CommentService {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
         // 必须带 parent/article 的图，避免事务结束后 maybeSendReplyEmail 触发 LazyInitializationException。
-        ArticleComment comment = commentRepository.findDetailedById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         ArticleCommentStatus before = comment.getStatus();
         changeCommentStatus(comment, ArticleCommentStatus.APPROVED);
         commentRepository.save(comment);
         // 先审后发：通过瞬间再尝试回复邮件（创建时尚未 APPROVED 不会发）。
-        if (before != ArticleCommentStatus.APPROVED && comment.getParent() != null) {
-            String actorName = displayNameOf(comment);
-            maybeSendReplyEmail(comment, actorName);
-        }
+        if (before != ArticleCommentStatus.APPROVED) notifyCommentCreated(comment, comment.getAuthor());
         return toAdminResponse(comment);
     }
 
@@ -628,8 +645,7 @@ public class CommentService {
     public AdminCommentResponse rejectComment(Long commentId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
-        ArticleComment comment = commentRepository.findDetailedById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         changeCommentStatus(comment, ArticleCommentStatus.REJECTED);
         commentRepository.save(comment);
         return toAdminResponse(comment);
@@ -639,8 +655,7 @@ public class CommentService {
     public AdminCommentResponse markCommentSpam(Long commentId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
-        ArticleComment comment = commentRepository.findDetailedById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         changeCommentStatus(comment, ArticleCommentStatus.SPAM);
         comment.setReported(false);
         // changeCommentStatus 不负责 flush；显式保存，避免 reported 变更在部分路径下未落库。
@@ -656,8 +671,8 @@ public class CommentService {
         if (!StringUtils.hasText(content)) {
             throw new BusinessException("回复内容不能为空");
         }
-        ArticleComment parent = commentRepository.findDetailedById(parentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment parent = requireLockedComment(parentId);
+        requireVisibleComment(parent);
         Article article = parent.getArticle();
         if (article == null) {
             throw new BusinessException("所属文章不存在");
@@ -703,7 +718,8 @@ public class CommentService {
         ArticleCommentStatus safeStatus = status == null ? ArticleCommentStatus.PENDING : status;
         return ids.stream()
                 .distinct()
-                .map(id -> commentRepository.findDetailedById(id)
+                .sorted()
+                .map(id -> java.util.Optional.ofNullable(lockComment(id))
                         .map(comment -> {
                             ArticleCommentStatus before = comment.getStatus();
                             changeCommentStatus(comment, safeStatus);
@@ -712,9 +728,8 @@ public class CommentService {
                             }
                             commentRepository.save(comment);
                             if (before != ArticleCommentStatus.APPROVED
-                                    && safeStatus == ArticleCommentStatus.APPROVED
-                                    && comment.getParent() != null) {
-                                maybeSendReplyEmail(comment, displayNameOf(comment));
+                                    && safeStatus == ArticleCommentStatus.APPROVED) {
+                                notifyCommentCreated(comment, comment.getAuthor());
                             }
                             return toAdminResponse(comment);
                         })
@@ -725,8 +740,7 @@ public class CommentService {
 
     @Transactional
     public void reportComment(Long commentId) {
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         requireCommentableArticle(comment.getArticle().getId());
         requireArticleCommentsEnabled(comment.getArticle());
         requireVisibleComment(comment);
@@ -738,10 +752,11 @@ public class CommentService {
     @Transactional
     public void deleteMyComment(Long commentId) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         // 本人可删自己的评论；管理员/博主可删任意评论。
-        if (!comment.getAuthor().getId().equals(currentUser.getId()) && !currentUserService.isAdmin(currentUser)) {
+        boolean ownAccount = !GUEST_USERNAME.equals(currentUser.getUsername())
+                && currentUser.getId().equals(realOwnerId(comment));
+        if (!ownAccount && !currentUserService.isAdmin(currentUser)) {
             throw new ForbiddenException("只能删除自己的评论");
         }
         deleteCommentTree(comment);
@@ -755,9 +770,8 @@ public class CommentService {
             List<Long> commentIds = Stream.concat(Stream.of(comment), replies.stream())
                     .map(ArticleComment::getId)
                     .toList();
-            long approvedCount = Stream.concat(Stream.of(comment), replies.stream())
-                    .filter(this::isApproved)
-                    .count();
+            long approvedCount = isApproved(comment) ? 1 + replies.stream().filter(this::isApproved).count() : 0;
+            commentIds.forEach(id -> moderationJobs.cancel("ARTICLE", id));
             commentLikeRepository.deleteAllByComment_IdIn(commentIds);
             commentRepository.deleteAllByParent_Id(comment.getId());
             commentRepository.delete(comment);
@@ -766,11 +780,12 @@ public class CommentService {
             }
         } else {
             ArticleComment parent = comment.getParent();
+            moderationJobs.cancel("ARTICLE", comment.getId());
             commentLikeRepository.deleteAllByComment_Id(comment.getId());
             commentRepository.delete(comment);
             if (isApproved(comment)) {
                 commentRepository.adjustReplyCount(parent.getId(), -1);
-                articleRepository.decrementCommentCount(articleId, 1);
+                if (isApproved(parent)) articleRepository.decrementCommentCount(articleId, 1);
             }
         }
     }
@@ -833,6 +848,58 @@ public class CommentService {
         if (root != null) requireApprovedComment(root);
     }
 
+    private Long realOwnerId(ArticleComment comment) {
+        return comment.getAuthor() == null || GUEST_USERNAME.equals(comment.getAuthor().getUsername())
+                ? null : comment.getAuthor().getId();
+    }
+
+    private boolean isMine(ArticleComment comment) {
+        return guestIdentity.owns(comment.getGuestIdentityHash(), realOwnerId(comment));
+    }
+
+    private void requireReadableComment(ArticleComment comment) {
+        if (!isApproved(comment) && !isMine(comment)) throw new BusinessException("评论不存在");
+        ArticleComment root = rootOf(comment);
+        if (root != comment && !isApproved(root)) throw new BusinessException("评论不存在");
+    }
+
+    private ArticleComment lockComment(Long id) {
+        Long articleId = commentRepository.findArticleIdById(id).orElse(null);
+        if (articleId == null || articleRepository.findLockedById(articleId).isEmpty()) return null;
+        return commentRepository.findLockedById(id).orElse(null);
+    }
+
+    private ArticleComment requireLockedComment(Long id) {
+        ArticleComment comment = lockComment(id);
+        if (comment == null) throw new BusinessException("评论不存在");
+        return comment;
+    }
+
+    private boolean reviewEligible(ArticleComment comment) {
+        if (comment == null || comment.getStatus() != ArticleCommentStatus.PENDING) return false;
+        Article article = comment.getArticle();
+        if (article == null || article.getStatus() != ArticleStatus.PUBLISHED || article.isDeleted()
+                || !article.isCommentsEnabled()) return false;
+        ArticleComment root = comment.getParent();
+        return root == null || (isApproved(root) && root.getParent() == null
+                && root.getArticle().getId().equals(article.getId()));
+    }
+
+    @Transactional(readOnly = true)
+    public String aiReviewContent(long id) {
+        ArticleComment comment = commentRepository.findById(id).orElse(null);
+        return reviewEligible(comment) ? comment.getContent() : null;
+    }
+
+    @Transactional
+    public void applyAiReview(long id, String lease, boolean approved) {
+        ArticleComment comment = lockComment(id);
+        if (!reviewEligible(comment) || !moderationJobs.finish("ARTICLE", id, lease)) return;
+        changeCommentStatus(comment, approved ? ArticleCommentStatus.APPROVED : ArticleCommentStatus.REJECTED);
+        commentRepository.save(comment);
+        if (approved) notifyCommentCreated(comment, comment.getAuthor());
+    }
+
     private void requireArticleCommentsEnabled(Article article) {
         if (!article.isCommentsEnabled()) {
             throw new BusinessException("该文章已关闭评论");
@@ -845,42 +912,12 @@ public class CommentService {
         }
     }
 
-    private ArticleCommentStatus resolveInitialStatus(String content) {
-        // 明确垃圾：直接 SPAM；其余默认自动通过。
-        // 仅当后台开启「评论先审后发」时，非垃圾评论才进入 PENDING。
-        int score = spamScore(content);
-        if (score >= 4) {
-            return ArticleCommentStatus.SPAM;
-        }
-        if (systemManagementService.isCommentModerationEnabled()) {
-            return ArticleCommentStatus.PENDING;
-        }
-        return ArticleCommentStatus.APPROVED;
-    }
-
-    private int spamScore(String content) {
-        if (!StringUtils.hasText(content)) return 0;
-        String normalized = content.toLowerCase();
-        int score = containsBlockedWord(content) ? 4 : 0; // 命中屏蔽词按垃圾处理
-        long links = java.util.regex.Pattern.compile("https?://|www\\.").matcher(normalized).results().count();
-        if (links >= 3) score += 3; else if (links > 0) score += 1;
-        if (normalized.matches("(?s).*(加微|微信|vx|v信|qq[:：]?\\s*\\d{5,}|代办|博彩|棋牌|发票|返利).*")) score += 3;
-        if (java.util.regex.Pattern.compile("(.)\\1{7,}").matcher(normalized).find()) score += 2;
-        if (content.length() > 1200) score += 1;
-        return score;
-    }
-
-    private boolean containsBlockedWord(String content) {
-        if (!StringUtils.hasText(content)) {
-            return false;
-        }
-        String normalizedContent = content.toLowerCase();
-        return systemManagementService.blockedCommentWords().stream()
-                .map(String::toLowerCase)
-                .anyMatch(normalizedContent::contains);
-    }
-
     private void changeCommentStatus(ArticleComment comment, ArticleCommentStatus targetStatus) {
+        moderationJobs.cancel("ARTICLE", comment.getId());
+        if (comment.getParent() == null && targetStatus != ArticleCommentStatus.APPROVED) {
+            commentRepository.findByParent_IdOrderByCreatedAtAsc(comment.getId())
+                    .forEach(reply -> moderationJobs.cancel("ARTICLE", reply.getId()));
+        }
         ArticleCommentStatus currentStatus = comment.getStatus();
         if (currentStatus == targetStatus) {
             comment.setReviewedAt(OffsetDateTime.now());
@@ -892,18 +929,22 @@ public class CommentService {
         Article article = comment.getArticle();
         boolean wasApproved = currentStatus == ArticleCommentStatus.APPROVED;
         boolean willBeApproved = targetStatus == ArticleCommentStatus.APPROVED;
+        if (willBeApproved && comment.getParent() != null) requireApprovedComment(comment.getParent());
+        long contribution = comment.getParent() == null
+                ? 1 + commentRepository.findByParent_IdOrderByCreatedAtAsc(comment.getId()).stream().filter(this::isApproved).count()
+                : (isApproved(comment.getParent()) ? 1 : 0);
         comment.setStatus(targetStatus);
         comment.setReviewedAt(OffsetDateTime.now());
         if (targetStatus != ArticleCommentStatus.PENDING) {
             comment.setReported(false);
         }
         if (wasApproved && !willBeApproved) {
-            articleRepository.decrementCommentCount(article.getId(), 1);
+            if (contribution > 0) articleRepository.decrementCommentCount(article.getId(), contribution);
             if (comment.getParent() != null) {
                 commentRepository.adjustReplyCount(comment.getParent().getId(), -1);
             }
         } else if (!wasApproved && willBeApproved) {
-            articleRepository.incrementCommentCount(article.getId());
+            if (contribution > 0) articleRepository.adjustCommentCount(article.getId(), contribution);
             if (comment.getParent() != null) {
                 commentRepository.adjustReplyCount(comment.getParent().getId(), 1);
             }
@@ -955,7 +996,8 @@ public class CommentService {
                 comment.getCreatedAt(),
                 comment.getRegion(),
                 comment.isPinned(),
-                replies
+                replies,
+                isMine(comment)
         );
     }
 
@@ -1017,8 +1059,7 @@ public class CommentService {
     public AdminCommentResponse setCommentPinned(Long commentId, boolean pinned) {
         UserAccount currentUser = currentUserService.requireCurrentUser();
         currentUserService.requireAdmin(currentUser);
-        ArticleComment comment = commentRepository.findById(commentId)
-                .orElseThrow(() -> new BusinessException("评论不存在"));
+        ArticleComment comment = requireLockedComment(commentId);
         if (comment.getParent() != null) {
             throw new BusinessException("仅顶级评论可置顶");
         }

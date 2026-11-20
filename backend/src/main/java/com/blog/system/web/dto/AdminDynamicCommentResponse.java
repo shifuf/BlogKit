@@ -12,6 +12,8 @@ public record AdminDynamicCommentResponse(
         String dynamicSummary,
         Long parentId,
         String replyTo,
-        String ip
+        String ip,
+        String status,
+        boolean visible
 ) {
 }

@@ -1,19 +1,30 @@
 package com.blog.system.service;
 
 import com.blog.system.common.exception.BusinessException;
+import com.blog.system.common.exception.GlobalExceptionHandler;
+import com.blog.system.common.util.ClientIpResolver;
 import com.blog.system.common.util.DownloadCipher;
 import com.blog.system.common.util.OutboundUrlValidator;
+import com.blog.system.common.util.SimpleRateLimiter;
 import com.blog.system.domain.system.SiteSetting;
 import com.blog.system.repository.SiteSettingRepository;
+import com.blog.system.web.controller.PublicSystemController;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.*;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 class MusicServiceTest {
     private HttpServer server;
@@ -23,6 +34,9 @@ class MusicServiceTest {
     private final AtomicInteger lyricCalls = new AtomicInteger();
     private boolean arraySearch;
     private boolean kugouUnavailable;
+    private boolean distinctSearchResults;
+    private boolean emptyQqSearch;
+    private final List<String> searchPaths = new ArrayList<>();
     private final Map<String, SiteSetting> saved = new HashMap<>();
     private MusicSettingsService settings;
     private final DownloadCipher cipher = new DownloadCipher("test-secret");
@@ -33,6 +47,8 @@ class MusicServiceTest {
         server.createContext("/", e -> {
             String path = e.getRequestURI().getPath();
             String q = e.getRequestURI().getRawQuery();
+            boolean searchRequest = !q.contains("&n=") && !q.contains("&mid=") && !q.contains("&id=");
+            if (searchRequest) searchPaths.add(path);
             if (kugouUnavailable && path.equals("/api/kugou_music")) {
                 byte[] b = "{\"msg\":\"酷狗暂不可用\"}".getBytes(StandardCharsets.UTF_8);
                 e.sendResponseHeaders(503, b.length); e.getResponseBody().write(b); e.close(); return;
@@ -54,6 +70,12 @@ class MusicServiceTest {
                 parseCalls.incrementAndGet(); body = detail;
             }
             if (arraySearch && path.equals("/api/163_search")) body = body.replace("\"data\":{\"songs\":", "\"data\":").replace("]}}", "]}");
+            if (searchRequest && distinctSearchResults) {
+                var songs = new ArrayList<Map<String, Object>>();
+                for (int i = 1; i <= 20; i++) songs.add(Map.of("id", i, "mid", "MID" + i, "name", path + "-" + i, "artist", "歌手"));
+                body = new ObjectMapper().writeValueAsString(path.equals("/api/163_search") ? Map.of("data", songs) : Map.of("list", songs));
+            }
+            if (searchRequest && emptyQqSearch && List.of("/qq_music.php", "/api/qq_music").contains(path)) body = "{\"list\":[]}";
             byte[] b = body.getBytes(StandardCharsets.UTF_8);
             e.getResponseHeaders().set("Content-Type", "application/json"); e.sendResponseHeaders(200, b.length);
             e.getResponseBody().write(b); e.close();
@@ -71,6 +93,94 @@ class MusicServiceTest {
         return new MusicService(mapper, new OutboundUrlValidator("localhost"), cipher, settings,
                 new MusicApiClient(mapper, new OutboundUrlValidator("localhost")),
                 base + "/qq_music.php", base + "/netease.php", base);
+    }
+
+    private MockMvc musicApi(MusicService music) {
+        var limiter = mock(SimpleRateLimiter.class);
+        when(limiter.tryAcquire(anyString(), anyInt(), anyLong())).thenReturn(true);
+        var controller = new PublicSystemController(null, null, null, limiter, new ClientIpResolver(0), music, null, null);
+        return MockMvcBuilders.standaloneSetup(controller).setControllerAdvice(new GlobalExceptionHandler()).build();
+    }
+
+    private List<MusicService.MusicSearchItem> searchPlatform(MusicService music, String platform) throws Exception {
+        String body = musicApi(music).perform(get("/api/v1/music/search").param("keyword", "稻香").param("platform", platform))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        var mapper = new ObjectMapper();
+        JsonNode items = mapper.readTree(body).path("data");
+        return mapper.readerForListOf(MusicService.MusicSearchItem.class).readValue(items);
+    }
+
+    @ParameterizedTest
+    @CsvSource({
+            "qq, QQ 音乐, /qq_music.php;/api/qq_music, qq;chksz_qq",
+            "netease, 网易云音乐, /netease.php;/api/163_search, netease;chksz_netease",
+            "kugou, 酷狗音乐, /api/kugou_music, chksz_kugou"
+    })
+    void selectedPlatformSearchesOnlyItsProvidersAndKeepsSamePlatformFallbacks(String platform, String label, String paths, String sources) throws Exception {
+        var music = service();
+        var found = searchPlatform(music, platform);
+        assertEquals(List.of(paths.split(";")), searchPaths, "unselected providers must not consume quota");
+        assertEquals(1, found.size());
+        assertEquals(label, found.get(0).sourceName());
+        var track = music.resolve(found.get(0).rid());
+        assertEquals(List.of(sources.split(";")), track.candidates().stream().map(MusicService.MusicCandidate::source).toList());
+        assertTrue(track.candidates().stream().allMatch(c -> c.url().startsWith("/api/v1/music/stream?rid=")));
+    }
+
+    @Test void selectedPlatformIsAppliedBeforeTheThirtyResultLimit() throws Exception {
+        distinctSearchResults = true;
+        var music = service();
+        assertEquals(30, music.search("稻香").size());
+        searchPaths.clear();
+        var found = searchPlatform(music, "kugou");
+        assertEquals(20, found.size());
+        assertEquals("/api/kugou_music-1", found.get(0).name());
+        assertEquals("酷狗音乐", found.get(0).sourceName());
+    }
+
+    @ParameterizedTest
+    @CsvSource({"spotify", "QQ", "qq;netease", "../qq"})
+    void invalidPlatformIsRejectedBeforeCallingProviders(String platform) throws Exception {
+        musicApi(service()).perform(get("/api/v1/music/search").param("keyword", "稻香").param("platform", platform))
+                .andExpect(status().isBadRequest());
+        assertEquals(List.of(), searchPaths);
+    }
+
+    @Test void absentPlatformRetainsAllProvidersAndShowsPlatformLabel() throws Exception {
+        var music = service();
+        String body = musicApi(music).perform(get("/api/v1/music/search").param("keyword", "稻香"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        var item = new ObjectMapper().readTree(body).path("data").get(0);
+        assertEquals("多平台", item.path("sourceName").asText());
+        assertEquals(5, music.resolve(item.path("rid").asText()).candidates().size());
+    }
+
+    @Test void unavailableSelectedPlatformIsReportedAsUnavailable() throws Exception {
+        kugouUnavailable = true;
+        var response = musicApi(service()).perform(get("/api/v1/music/search").param("keyword", "稻香").param("platform", "kugou"))
+                .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertTrue(new ObjectMapper().readTree(response).path("message").asText().contains("暂不可用"));
+    }
+
+    @ParameterizedTest
+    @CsvSource({"qq, cyQqKey", "netease, cyNeteaseKey", "kugou, chkszKey"})
+    void selectedPlatformWithoutConfiguredProvidersIsReportedAsUnavailable(String platform, String key) throws Exception {
+        var disabled = new HashMap<String, String>();
+        disabled.put("chkszKey", "");
+        disabled.put(key, "");
+        settings.save(disabled);
+        var response = musicApi(service()).perform(get("/api/v1/music/search").param("keyword", "稻香").param("platform", platform))
+                .andExpect(status().isBadRequest()).andReturn().getResponse().getContentAsString(StandardCharsets.UTF_8);
+        assertTrue(new ObjectMapper().readTree(response).path("message").asText().contains("暂不可用"));
+        assertEquals(List.of(), searchPaths);
+    }
+
+    @Test void unrelatedProviderFailureDoesNotTurnAnEmptySelectedSearchIntoAnOutage() throws Exception {
+        kugouUnavailable = true;
+        emptyQqSearch = true;
+        var music = service();
+        music.search("稻香");
+        assertEquals(List.of(), searchPlatform(music, "qq"));
     }
 
     @Test void mergesFiveSourcesAndUsesStableChkszIds() {

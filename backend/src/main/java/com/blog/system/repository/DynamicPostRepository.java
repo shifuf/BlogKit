@@ -10,8 +10,18 @@ import org.springframework.data.repository.query.Param;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 
 public interface DynamicPostRepository extends JpaRepository<DynamicPost, Long> {
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select d from DynamicPost d where d.id = :id")
+    Optional<DynamicPost> findLockedById(@Param("id") Long id);
+
+    @Modifying(flushAutomatically = true)
+    @Query("update DynamicPost d set d.commentCount = case when d.commentCount + :delta < 0 then 0 else d.commentCount + :delta end where d.id = :id")
+    int adjustCommentCount(@Param("id") Long id, @Param("delta") long delta);
     Page<DynamicPost> findByVisibleTrue(Pageable pageable);
 
     List<DynamicPost> findAllByVisibleTrueOrderByPublishedAtDescIdDesc();

@@ -22,6 +22,8 @@ class CommentServiceTest {
     ExternalNotificationService external;
     ArticleQueryService access;
     CommentService service;
+    CommentModerationJobs jobs;
+    NotificationService notifications;
     List<ArticleComment> savedComments;
     Article article;
     UserAccount actor;
@@ -33,8 +35,11 @@ class CommentServiceTest {
         settings = mock(SystemManagementService.class);
         external = mock(ExternalNotificationService.class);
         access = mock(ArticleQueryService.class);
+        jobs = mock(CommentModerationJobs.class);
+        notifications = mock(NotificationService.class);
         service = new CommentService(comments, likes, articles, users, settings,
-                mock(UserAccountRepository.class), mock(NotificationService.class), external, access, "https://example.org");
+                mock(UserAccountRepository.class), notifications, external, access,
+                new GuestCommentIdentity(users), new CommentModerationPolicy(settings), jobs, "https://example.org");
         actor = user(1L, "Alice");
         article = new Article();
         ReflectionTestUtils.setField(article, "id", 10L);
@@ -43,6 +48,7 @@ class CommentServiceTest {
         article.setTitle("Article");
         article.setCommentsEnabled(true);
         when(articles.findByIdAndStatusAndDeletedAtIsNull(10L, ArticleStatus.PUBLISHED)).thenReturn(Optional.of(article));
+        when(articles.findLockedById(10L)).thenReturn(Optional.of(article));
         when(users.getCurrentUserOrNull()).thenReturn(actor);
         when(users.requireCurrentUser()).thenReturn(actor);
         when(access.canViewContent(article, actor)).thenReturn(true);
@@ -50,6 +56,8 @@ class CommentServiceTest {
         when(comments.save(any())).thenAnswer(i -> {
             ArticleComment c = i.getArgument(0);
             if(c.getId() == null) ReflectionTestUtils.setField(c, "id", 99L);
+            when(comments.findLockedById(c.getId())).thenReturn(Optional.of(c));
+            when(comments.findArticleIdById(c.getId())).thenReturn(Optional.of(10L));
             savedComments.add(c);
             return c;
         });
@@ -63,10 +71,21 @@ class CommentServiceTest {
         c.setArticle(article); c.setAuthor(user(id+100, name)); c.setParent(parent); c.setContent(content);
         when(comments.findById(id)).thenReturn(Optional.of(c));
         when(comments.findDetailedById(id)).thenReturn(Optional.of(c));
+        when(comments.findLockedById(id)).thenReturn(Optional.of(c));
+        when(comments.findArticleIdById(id)).thenReturn(Optional.of(10L));
         return c;
     }
     @SuppressWarnings("unchecked") Map<String,Object> json(Object dto) {
         return new ObjectMapper().findAndRegisterModules().convertValue(dto, Map.class);
+    }
+    @Test void aiEnabledNewCommentStaysPendingAndCannotNotifyItsRecipient() {
+        when(settings.isCommentAiModerationEnabled()).thenReturn(true);
+        var result = service.createComment(new CommentCreateRequest(10L,null,"Helpful question",null,null,null,false),null);
+        assertEquals("PENDING",result.status());
+        assertEquals(Boolean.TRUE,json(result).get("mine"));
+        verify(articles,never()).incrementCommentCount(anyLong());
+        verifyNoInteractions(notifications);
+        verify(jobs).enqueue("ARTICLE",99L);
     }
     @Test void approvedReplyCountSurvivesArticleContextClear() {
         comment(20,null,"Bob","Root");
@@ -108,6 +127,8 @@ class CommentServiceTest {
         ArticleComment reply=comment(21,root,"Carol","Reply");
         when(comments.findApprovedReplies(eq(20L),eq(ArticleCommentStatus.APPROVED),any()))
                 .thenAnswer(i -> new org.springframework.data.domain.PageImpl<>(List.of(reply),i.getArgument(2),105));
+        when(comments.findVisibleReplies(eq(20L),eq(1L),isNull(),any()))
+                .thenAnswer(i -> new org.springframework.data.domain.PageImpl<>(List.of(reply),i.getArgument(3),105));
         var page=service.findCommentReplies(20L,3,10);
         assertEquals(3,page.page()); assertEquals(10,page.size()); assertEquals(105,page.totalItems());
         assertEquals(21L,page.items().get(0).id());
@@ -116,10 +137,10 @@ class CommentServiceTest {
     @Test void rootListIncludesOnlyBoundedReplyPreview() {
         ArticleComment root=comment(20,null,"Bob","Root");
         ArticleComment reply=comment(21,root,"Carol","Reply");
-        when(comments.findApprovedRootComments(eq(10L),eq(ArticleCommentStatus.APPROVED),any()))
-                .thenAnswer(i -> new org.springframework.data.domain.PageImpl<>(List.of(root),i.getArgument(2),1));
-        when(comments.findApprovedReplies(eq(20L),eq(ArticleCommentStatus.APPROVED),any()))
-                .thenAnswer(i -> { org.springframework.data.domain.Pageable p=i.getArgument(2);
+        when(comments.findVisibleRootComments(eq(10L),eq(1L),isNull(),any()))
+            .thenAnswer(i -> new org.springframework.data.domain.PageImpl<>(List.of(root),i.getArgument(3),1));
+        when(comments.findVisibleReplies(eq(20L),eq(1L),isNull(),any()))
+                .thenAnswer(i -> { org.springframework.data.domain.Pageable p=i.getArgument(3);
                     assertEquals(2,p.getPageSize()); return new org.springframework.data.domain.PageImpl<>(List.of(reply),p,105); });
         var page=service.findArticleComments(10L,0,20);
         assertEquals(1,page.items().get(0).replies().size());

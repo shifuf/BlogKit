@@ -10,6 +10,7 @@ test('article comments begin loading after mount so SSR and initial client state
   const watchers = [];
   vm.runInNewContext(lifecycle, {
     props: { articleId: 2, interactionCount: 1 }, interactionDelta: { value: 0 },
+    invalidateComments() {}, userStore: {}, onBeforeUnmount() {}, disposed: false,
     watch(_value, callback, options) { watchers.push(callback); if (options?.immediate) callback(); },
     onMounted(callback) { mounted = callback; }, loadRemoteComments() { loads++; },
     loadSiteSettings() {}, applyGuestProfile() {}, form: { author: '' }, replyForm: {}, rememberedGuestName: { value: '' }

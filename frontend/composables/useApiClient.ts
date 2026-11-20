@@ -1,5 +1,7 @@
 import type { ApiResponse, PageResponse } from '~/types/api';
 import type { ArticleDetail, ArticleSummary, CategorySummary, CommentSummary, DownloadResource, DynamicPost, DynamicComment, EngagementState, FriendLinkSummary, LoginPayload, OAuthAuthorizePayload, OAuthCallbackPayload, OAuthLoginPayload, RegisterPayload, SiteSettings, TagSummary, ArticleSort, PasswordChangePayload, UserCommentSummary, UserProfile, UserProfileUpdatePayload, UserSession, UserNotification } from '~/types/blog';
+// Browser requests share one initialization even when separate components create API clients.
+const commentIdentityBootstraps = new Map<string, Promise<unknown>>();
 export const useApiClient = () => {
   const config = useRuntimeConfig();
   const userStore = useStore.user();
@@ -10,6 +12,28 @@ export const useApiClient = () => {
     return {
       [userStore.tokenName || 'Authorization']: `Bearer ${userStore.accessToken}`
     };
+  };
+  const commentRequest = async <T>(path: string, options: {
+    method?: 'POST'; body?: object; query?: Record<string, number>; signal?: AbortSignal;
+  } = {}) => {
+    const headers = authHeaders();
+    if (import.meta.client) {
+      const base = String(config.public.apiBaseUrl);
+      let bootstrap = commentIdentityBootstraps.get(base);
+      if (!bootstrap) {
+        const initialize = async () => {
+          const response = await $fetch<ApiResponse<null>>('/comments/identity', { baseURL: base, credentials: 'include' });
+          if (!response.success) throw new Error('评论身份初始化失败，请重试');
+        };
+        const pending = typeof navigator !== 'undefined' && navigator.locks
+          ? navigator.locks.request('blog-comment-identity', initialize) : initialize();
+        bootstrap = pending.catch(error => { commentIdentityBootstraps.delete(base); throw error; });
+        commentIdentityBootstraps.set(base, bootstrap);
+      }
+      await bootstrap;
+    }
+    options.signal?.throwIfAborted();
+    return $fetch<ApiResponse<T>>(path, { baseURL: config.public.apiBaseUrl, ...options, headers, credentials: 'include' });
   };
   const fetchArticleSummaries = (page = 0, size = 10, filters: {
     categorySlug?: string;
@@ -116,10 +140,10 @@ export const useApiClient = () => {
       baseURL: config.public.apiBaseUrl
     });
   };
-  const fetchDynamicLikeStatus = (id: number, guestKey: string) => {
-    return $fetch<ApiResponse<{ liked: boolean; likeCount: number }>>(`/dynamics/${id}/like`, {
+  const fetchDynamicLikeStatus = (id: number, guestKey: string, signal?: AbortSignal) => {
+    return $fetch<ApiResponse<{ liked: boolean; likeCount: number; commentCount: number }>>(`/dynamics/${id}/like`, {
       baseURL: config.public.apiBaseUrl,
-      query: { guestKey }
+      query: { guestKey }, signal
     });
   };
   const toggleDynamicLike = (id: number, guestKey: string) => {
@@ -129,21 +153,19 @@ export const useApiClient = () => {
       body: { guestKey }
     });
   };
-  const fetchDynamicComments = (id: number, page = 0, size = 10) => {
-    return $fetch<ApiResponse<PageResponse<DynamicComment>>>(`/dynamics/${id}/comments`, {
-      baseURL: config.public.apiBaseUrl,
-      query: { page, size }
+  const fetchDynamicComments = (id: number, page = 0, size = 10, signal?: AbortSignal) => {
+    return commentRequest<PageResponse<DynamicComment>>(`/dynamics/${id}/comments`, {
+      query: { page, size }, signal
     });
   };
-  const fetchDynamicReplies = (id: number, rootId: number, page = 0, size = 10) =>
-    $fetch<ApiResponse<PageResponse<DynamicComment>>>(`/dynamics/${id}/comments/${rootId}/replies`, {
-      baseURL: config.public.apiBaseUrl, query: { page, size }
+  const fetchDynamicReplies = (id: number, rootId: number, page = 0, size = 10, signal?: AbortSignal) =>
+    commentRequest<PageResponse<DynamicComment>>(`/dynamics/${id}/comments/${rootId}/replies`, {
+      query: { page, size }, signal
     });
-  const postDynamicComment = (id: number, payload: { authorName: string; content: string; guestKey: string; parentId?: number | null }) => {
-    return $fetch<ApiResponse<DynamicComment>>(`/dynamics/${id}/comments`, {
-      baseURL: config.public.apiBaseUrl,
+  const postDynamicComment = (id: number, payload: { authorName: string; content: string; guestKey?: string; parentId?: number | null }, signal?: AbortSignal) => {
+    return commentRequest<DynamicComment>(`/dynamics/${id}/comments`, {
       method: 'POST',
-      body: payload
+      body: payload, signal
     });
   };
   const fetchFriendLinks = () => {
@@ -270,19 +292,18 @@ export const useApiClient = () => {
       headers: authHeaders()
     });
   };
-  const fetchComments = (articleId: number, page = 0, size = 20) => {
-    return $fetch<ApiResponse<PageResponse<CommentSummary>>>(`/articles/${articleId}/comments`, {
-      baseURL: config.public.apiBaseUrl,
+  const fetchComments = (articleId: number, page = 0, size = 20, signal?: AbortSignal) => {
+    return commentRequest<PageResponse<CommentSummary>>(`/articles/${articleId}/comments`, {
       query: {
         page,
         size
       },
-      headers: authHeaders()
+      signal
     });
   };
-  const fetchCommentReplies = (commentId: number, page = 0, size = 10) => {
-    return $fetch<ApiResponse<PageResponse<CommentSummary>>>(`/comments/${commentId}/replies`, {
-      baseURL: config.public.apiBaseUrl, query: { page, size }, headers: authHeaders()
+  const fetchCommentReplies = (commentId: number, page = 0, size = 10, signal?: AbortSignal) => {
+    return commentRequest<PageResponse<CommentSummary>>(`/comments/${commentId}/replies`, {
+      query: { page, size }, signal
     });
   };
   const likeArticle = (articleId: number, guestKey?: string) => {
@@ -318,9 +339,8 @@ export const useApiClient = () => {
     guestName?: string;
     guestEmail?: string;
     guestWebsite?: string;
-  }, notifyOnReply?: boolean) => {
-    return $fetch<ApiResponse<CommentSummary>>('/comments', {
-      baseURL: config.public.apiBaseUrl,
+  }, notifyOnReply?: boolean, signal?: AbortSignal) => {
+    return commentRequest<CommentSummary>('/comments', {
       method: 'POST',
       body: {
         articleId,
@@ -329,7 +349,7 @@ export const useApiClient = () => {
         notifyOnReply: Boolean(notifyOnReply),
         ...(guest || {})
       },
-      headers: authHeaders()
+      signal
     });
   };
   const toggleCommentLike = (commentId: number) => {

@@ -112,27 +112,19 @@ const expandedThreads = ref<Set<number>>(new Set());
 const activeReply = ref<ActiveReplyState | null>(null);
 const form = reactive<CommentFormState>(createForm());
 const replyForm = reactive<CommentFormState>(createForm());
-// 记住自己的游客昵称，用于高亮本人评论（与 localStorage 同步）
+// 仅用于下次填写，评论归属由服务器凭证判定。
 const rememberedGuestName = ref('');
 const useRemoteComments = computed(() => Number.isInteger(props.articleId) && Number(props.articleId) > 0);
 // 文章级评论开关：关闭时前台直接展示「评论已关闭」，不再显示编辑器（避免填写后提交才被后端拒绝）。
 const commentsClosed = computed(() => props.commentsEnabled === false);
 const currentUserName = computed(() => userStore.displayName || userStore.username || '当前用户');
-const isSelfComment = (comment: CommentItem) => {
-  if (userStore.isAuthenticated) {
-    return comment.author === currentUserName.value
-      || comment.author === userStore.username
-      || comment.author === userStore.displayName;
-  }
-  const mine = (rememberedGuestName.value || form.author || '').trim();
-  return Boolean(mine) && comment.author === mine;
-};
+const isSelfComment = (comment: CommentItem) => comment.mine === true;
 // 邮件通知：后台总开关决定是否展示勾选；真正发信还需要平台已配置（后台 notificationPlatformEnabled）
 const replyEmailFeatureEnabled = computed(() => Boolean(siteSettings.value.commentReplyEmailEnabled));
 const notificationPlatformReady = computed(() => Boolean(siteSettings.value.notificationPlatformEnabled));
 // 勾选展示只看功能开关，避免平台 Key 未填时勾选被隐藏导致用户以为功能坏了
 const replyEmailAvailable = computed(() => replyEmailFeatureEnabled.value);
-const hasMoreComments = computed(() => comments.value.filter(c => !c.status || c.status === 'APPROVED').length < commentsTotal.value);
+const hasMoreComments = computed(() => comments.value.length < commentsTotal.value);
 const replyCount = (comment: CommentItem) => comment.replyCount ?? comment.replies?.length ?? 0;
 // 互动 = 根评论 + 回复。优先文章 commentCount；并用已加载树校验，避免漏计回复。
 const interactionTotal = computed(() => {
@@ -149,24 +141,78 @@ const visibleReplies = (comment: CommentItem) => {
   return isExpanded(comment.id) ? replies : replies.slice(0, 2);
 };
 const replyPages = ref<Record<number, number>>({});
+const replyTotals = ref<Record<number, number>>({});
 const repliesLoading = ref<Set<number>>(new Set());
+const mergeComments = (existing: CommentItem[], incoming: CommentItem[]) => {
+  const items = new Map(existing.map(item => [item.id, item]));
+  incoming.forEach(item => items.set(item.id, item));
+  return [...items.values()];
+};
+const isApproved = (comment: CommentItem) => !comment.status || comment.status === 'APPROVED';
+let commentGeneration = 0;
+let listGeneration = 0;
+let disposed = false;
+let listController: AbortController | null = null;
+const replyControllers = new Map<number, AbortController>();
+const captureScope = () => ({ generation: commentGeneration, articleId: props.articleId,
+  token: userStore.accessToken, tokenName: userStore.tokenName, authenticated: userStore.isAuthenticated });
+const scopeIsCurrent = (scope: ReturnType<typeof captureScope>) => !disposed
+  && scope.generation === commentGeneration && scope.articleId === props.articleId && scope.token === userStore.accessToken
+  && scope.tokenName === userStore.tokenName && scope.authenticated === userStore.isAuthenticated;
+let pollTimer: ReturnType<typeof setTimeout> | null = null;
+let pollAttempts = 0;
+const pendingIds = () => new Set(comments.value.flatMap(root => [root, ...(root.replies || [])])
+  .filter(comment => comment.mine && comment.status === 'PENDING').map(comment => comment.id));
+const stopPolling = () => {
+  if (pollTimer !== null) clearTimeout(pollTimer);
+  pollTimer = null;
+};
+const schedulePolling = () => {
+  stopPolling();
+  if (disposed || commentsClosed.value || !pendingIds().size || pollAttempts >= 24) return;
+  pollTimer = setTimeout(async () => {
+    pollTimer = null;
+    pollAttempts++;
+    await loadRemoteComments(false, true);
+  }, 5000);
+};
+const hasMoreReplies = (comment: CommentItem) => {
+  const loaded = comment.replies?.length || 0;
+  const total = replyTotals.value[comment.id];
+  return total === undefined ? loaded >= 2 || loaded < replyCount(comment) : loaded < total;
+};
 const loadMoreReplies = async (comment: CommentItem) => {
-  if (repliesLoading.value.has(comment.id)) return;
+  if (repliesLoading.value.has(comment.id) || (listController && !listController.signal.aborted)) return;
+  const scope = captureScope();
+  const controller = new AbortController();
+  replyControllers.get(comment.id)?.abort();
+  replyControllers.set(comment.id, controller);
   repliesLoading.value = new Set(repliesLoading.value).add(comment.id);
+  const beforePending = pendingIds();
   try {
     const page = replyPages.value[comment.id] ?? 0;
-    const response = await fetchCommentReplies(comment.id, page, 10);
+    const response = await fetchCommentReplies(comment.id, page, 10, controller.signal);
+    if (!scopeIsCurrent(scope) || replyControllers.get(comment.id) !== controller || findRootComment(comment.id) !== comment) return;
     if (response.success) {
       const incoming = response.data.items.map(toBlogComment);
-      const existing = page === 0 ? [] : (comment.replies || []);
-      comment.replies = [...existing, ...incoming.filter(item => !existing.some(c => c.id === item.id))];
-      comment.replyCount = response.data.totalItems;
+      const existing = page === 0 ? (comment.replies || []).filter(item => item.mine && !isApproved(item)) : (comment.replies || []);
+      comment.replies = mergeComments(existing, incoming);
+      replyTotals.value[comment.id] = response.data.totalItems;
       replyPages.value[comment.id] = page + 1;
+      const afterPending = pendingIds();
+      if ([...beforePending].some(id => !afterPending.has(id))) {
+        notifyCommentPosted();
+        await loadRemoteComments(false, true);
+      }
+      schedulePolling();
     }
   } catch (error) {
-    ElMessage.error(apiErrorMessage(error, '回复加载失败'));
+    if (scopeIsCurrent(scope) && !controller.signal.aborted) ElMessage.error(apiErrorMessage(error, '回复加载失败'));
   } finally {
-    const next = new Set(repliesLoading.value); next.delete(comment.id); repliesLoading.value = next;
+    if (replyControllers.get(comment.id) === controller) {
+      replyControllers.delete(comment.id);
+      const next = new Set(repliesLoading.value); next.delete(comment.id); repliesLoading.value = next;
+    }
   }
 };
 const toggleReplies = (id: number) => {
@@ -176,7 +222,7 @@ const toggleReplies = (id: number) => {
   } else {
     next.add(id);
     const root = findRootComment(id);
-    if (root && (root.replies?.length || 0) < replyCount(root)) void loadMoreReplies(root);
+    if (root && hasMoreReplies(root)) void loadMoreReplies(root);
   }
   expandedThreads.value = next;
 };
@@ -387,7 +433,7 @@ const closeReply = () => {
   uploadedImages.value.reply = [];
 };
 const isReplyOpen = (rootId: number, targetId: number) => activeReply.value?.rootId === rootId && activeReply.value.targetId === targetId;
-const loadRemoteComments = async (append = false) => {
+const loadRemoteComments = async (append = false, silent = false) => {
   if (!import.meta.client || commentsClosed.value) return;
   if (!useRemoteComments.value || !props.articleId) {
     comments.value = [];
@@ -395,32 +441,71 @@ const loadRemoteComments = async (append = false) => {
     interactionDelta.value = 0;
     return;
   }
-  if (!append) {
-    commentsPage.value = 0;
-  }
-  commentsLoading.value = true;
+  const scope = captureScope();
+  const requestId = ++listGeneration;
+  listController?.abort();
+  const controller = new AbortController();
+  listController = controller;
+  replyControllers.forEach(replyController => replyController.abort());
+  replyControllers.clear();
+  repliesLoading.value = new Set();
+  const firstPage = append ? commentsPage.value : 0;
+  const pageCount = append ? 1 : Math.max(1, commentsPage.value);
+  const beforePending = pendingIds();
+  if (!silent) commentsLoading.value = true;
   try {
-    const response = await fetchComments(props.articleId, commentsPage.value, commentsPageSize);
-    if (response.success) {
-      const items = response.data.items.map(toBlogComment);
-      comments.value = append ? [...comments.value, ...items] : items;
-      if (!append) replyPages.value = {};
-      commentsTotal.value = response.data.totalItems ?? 0;
-      commentsPage.value += 1;
-    } else {
-      if (!append) {
-        comments.value = [];
-        commentsTotal.value = 0;
+    let items: CommentItem[] = [];
+    let total = 0;
+    let lastPage = firstPage;
+    const refreshedReplyPages: Record<number, number> = {};
+    const refreshedReplyTotals: Record<number, number> = {};
+    for (let page = firstPage; page < firstPage + pageCount; page++) {
+      const response = await fetchComments(Number(scope.articleId), page, commentsPageSize, controller.signal);
+      if (!scopeIsCurrent(scope) || requestId !== listGeneration) return;
+      if (!response.success) throw new Error(response.message || '评论加载失败');
+      items = mergeComments(items, response.data.items.map(toBlogComment));
+      total = response.data.totalItems ?? 0;
+      lastPage = page;
+      if (!response.data.items.length || (page + 1) * commentsPageSize >= total) break;
+    }
+    // Refresh already expanded pages as well: previews alone must not erase a loaded conversation.
+    if (!append) {
+      for (const root of items) {
+        const previous = findRootComment(root.id);
+        const privatePages = previous?.replies?.some(reply => reply.mine && !isApproved(reply))
+          ? Math.ceil(previous.replies.length / 10) : 0;
+        const pages = Math.max(replyPages.value[root.id] || 0, privatePages);
+        if (!pages) continue;
+        let replies = root.replies || [];
+        for (let page = 0; page < pages; page++) {
+          const response = await fetchCommentReplies(root.id, page, 10, controller.signal);
+          if (!scopeIsCurrent(scope) || requestId !== listGeneration) return;
+          if (!response.success) throw new Error(response.message || '回复加载失败');
+          replies = mergeComments(replies, response.data.items.map(toBlogComment));
+          refreshedReplyTotals[root.id] = response.data.totalItems;
+          refreshedReplyPages[root.id] = page + 1;
+          if ((page + 1) * 10 >= response.data.totalItems) break;
+        }
+        root.replies = replies;
       }
     }
+    if (!scopeIsCurrent(scope) || requestId !== listGeneration) return;
+    comments.value = append ? mergeComments(comments.value, items) : items;
+    Object.assign(replyPages.value, refreshedReplyPages);
+    Object.assign(replyTotals.value, refreshedReplyTotals);
+    commentsTotal.value = total;
+    commentsPage.value = lastPage + 1;
+    const afterPending = pendingIds();
+    if ([...beforePending].some(id => !afterPending.has(id))) notifyCommentPosted();
   } catch (error) {
-    if (!append) {
-      comments.value = [];
-      commentsTotal.value = 0;
-    }
-    ElMessage.error(apiErrorMessage(error, '评论加载失败'));
+    if (scopeIsCurrent(scope) && requestId === listGeneration && !controller.signal.aborted && !silent)
+      ElMessage.error(apiErrorMessage(error, '评论加载失败'));
   } finally {
-    commentsLoading.value = false;
+    if (listController === controller) listController = null;
+    if (scopeIsCurrent(scope) && requestId === listGeneration) {
+      commentsLoading.value = false;
+      schedulePolling();
+    }
   }
 };
 const loadMoreComments = () => {
@@ -433,14 +518,19 @@ const submitComment = async () => {
     return;
   }
   if (!validateForm(form)) return;
+  const scope = captureScope();
   if (useRemoteComments.value && props.articleId) {
     try {
       const response = await createComment(props.articleId, form.content.trim(), undefined, guestPayloadOf(form), form.notifyOnReply);
+      if (!scopeIsCurrent(scope)) return;
       if (response.success) {
+        listGeneration++;
+        listController?.abort();
+        commentsLoading.value = false;
         const posted = toBlogComment(response.data);
-        comments.value.unshift(posted);
+        comments.value = [posted, ...comments.value.filter(item => item.id !== posted.id)];
+        commentsTotal.value += 1;
         if (response.data.status === 'APPROVED') {
-          commentsTotal.value += 1;
           interactionDelta.value += 1;
         }
         if (!userStore.isAuthenticated) {
@@ -449,10 +539,12 @@ const submitComment = async () => {
         }
         resetForm(form);
         notifyCommentPosted();
+        pollAttempts = 0;
+        schedulePolling();
         ElMessage.success(response.data.status === 'APPROVED' ? '评论已发布' : '评论已提交，审核通过后公开显示');
       }
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '评论发布失败'));
+      if (scopeIsCurrent(scope)) ElMessage.error(apiErrorMessage(error, '评论发布失败'));
     }
     return;
   }
@@ -466,16 +558,25 @@ const submitReply = async () => {
   if (!activeReply.value || !validateForm(replyForm)) return;
   const root = findRootComment(activeReply.value.rootId);
   if (!root) return;
+  const scope = captureScope();
   if (useRemoteComments.value && props.articleId) {
     try {
       const response = await createComment(props.articleId, replyForm.content.trim(), activeReply.value.targetId, guestPayloadOf(replyForm), replyForm.notifyOnReply);
+      if (!scopeIsCurrent(scope)) return;
       if (response.success) {
+        listGeneration++;
+        listController?.abort();
+        commentsLoading.value = false;
+        replyControllers.get(root.id)?.abort();
+        replyControllers.delete(root.id);
+        repliesLoading.value = new Set([...repliesLoading.value].filter(id => id !== root.id));
         const reply = toBlogComment(response.data);
-        root.replies ??= [];
-        root.replies.push(reply);
+        root.replies = mergeComments(root.replies || [], [reply]);
         const approved = reply.status === 'APPROVED';
         root.replyCount = (root.replyCount ?? root.replies.length - 1) + (approved ? 1 : 0);
         interactionDelta.value += approved ? 1 : 0;
+        const visibleTotal = replyTotals.value[root.id];
+        if (visibleTotal !== undefined) replyTotals.value[root.id] = visibleTotal + 1;
         expandedThreads.value = new Set(expandedThreads.value).add(root.id);
         if (!userStore.isAuthenticated) {
           saveGuestProfile(replyForm);
@@ -487,10 +588,12 @@ const submitReply = async () => {
         }
         closeReply();
         notifyCommentPosted();
+        pollAttempts = 0;
+        schedulePolling();
         ElMessage.success(response.data.status === 'APPROVED' ? '回复已发布' : '回复已提交，审核通过后公开显示');
       }
     } catch (error) {
-      ElMessage.error(apiErrorMessage(error, '回复发布失败'));
+      if (scopeIsCurrent(scope)) ElMessage.error(apiErrorMessage(error, '回复发布失败'));
     }
     return;
   }
@@ -514,7 +617,7 @@ const removeComment = async (comment: CommentItem) => {
     if (response.success) {
       // 先按本地树扣减，刷新后若根评论已全部加载则以树为准。
       const isRoot = comments.value.some(item => item.id === comment.id);
-      const removed = isRoot ? 1 + Number(replyCount(comment) || 0) : 1;
+      const removed = !isApproved(comment) ? 0 : isRoot ? 1 + Number(replyCount(comment) || 0) : 1;
       interactionDelta.value -= removed;
       ElMessage.success('评论已删除');
       await loadRemoteComments();
@@ -548,15 +651,45 @@ const reportCurrentComment = async (comment: CommentItem) => {
     reportingCommentId.value = null;
   }
 };
+const invalidateComments = () => {
+  commentGeneration++;
+  listGeneration++;
+  listController?.abort();
+  replyControllers.forEach(controller => controller.abort());
+  replyControllers.clear();
+  stopPolling();
+  pollAttempts = 0;
+  comments.value = [];
+  commentsTotal.value = 0;
+  commentsPage.value = 0;
+  commentsLoading.value = false;
+  replyPages.value = {};
+  replyTotals.value = {};
+  repliesLoading.value = new Set();
+  expandedThreads.value = new Set();
+  closeReply();
+};
+let mounted = false;
 watch(() => props.articleId, () => {
+  invalidateComments();
   interactionDelta.value = 0;
-  void loadRemoteComments(false);
-});
+  if (mounted) void loadRemoteComments(false);
+}, { flush: 'sync' });
+watch(() => [userStore.accessToken, userStore.tokenName, userStore.isAuthenticated], () => {
+  invalidateComments();
+  interactionDelta.value = 0;
+  if (mounted) void loadRemoteComments(false);
+}, { flush: 'sync' });
+watch(() => props.commentsEnabled, () => {
+  invalidateComments();
+  if (mounted) void loadRemoteComments(false);
+}, { flush: 'sync' });
 watch(() => props.interactionCount, () => {
   // 文章侧 commentCount 刷新后，本地增量归零，避免重复累加。
   interactionDelta.value = 0;
 });
 onMounted(() => {
+  mounted = true;
   void loadSiteSettings();
   // Start client-only requests after hydration; SSR renders the same idle state.
   void loadRemoteComments(false);
@@ -565,6 +698,10 @@ onMounted(() => {
     applyGuestProfile(replyForm);
     rememberedGuestName.value = form.author.trim();
   }
+});
+onBeforeUnmount(() => {
+  disposed = true;
+  invalidateComments();
 });
 </script>
 
@@ -664,14 +801,15 @@ onMounted(() => {
                 <span v-if="isSelfComment(comment)" class="aero-comment__badge aero-comment__badge--mine">我</span>
                 <BadgeCheck v-if="comment.verified" class="aero-comment__verified" :size="15" aria-label="已认证" />
                 <span v-if="comment.badge" class="aero-comment__badge">{{ comment.badge }}</span>
+                <BlogCommentStatusBadge :status="comment.status" />
               </div>
 
               <div class="aero-comment__actions">
-                <button class="aero-comment__reply-toggle" type="button" :aria-label="`回复 ${comment.author}`" @click="openReply(comment, comment)">
+                <button v-if="isApproved(comment)" class="aero-comment__reply-toggle" type="button" :aria-label="`回复 ${comment.author}`" @click="openReply(comment, comment)">
                   <MessageCircle :size="16" />
                   <span v-if="replyCount(comment)">{{ replyCount(comment) }}</span>
                 </button>
-                <button class="aero-comment__report" type="button" :disabled="reportingCommentId === comment.id" :aria-label="`举报 ${comment.author} 的评论`" @click="reportCurrentComment(comment)">
+                <button v-if="isApproved(comment)" class="aero-comment__report" type="button" :disabled="reportingCommentId === comment.id" :aria-label="`举报 ${comment.author} 的评论`" @click="reportCurrentComment(comment)">
                   <Flag :size="15" />
                 </button>
                 <button v-if="isAdmin" class="aero-comment__delete" type="button" :disabled="deletingCommentId === comment.id" :aria-label="`删除 ${comment.author} 的评论`" @click="removeComment(comment)">
@@ -681,7 +819,6 @@ onMounted(() => {
             </div>
 
             <time class="aero-comment__meta-line" :datetime="commentTimeSource(comment)" :title="absoluteCommentTime(comment)">{{ displayCommentTime(comment) }}</time>
-            <p v-if="comment.status && comment.status !== 'APPROVED'" role="status">待审核，暂未公开</p>
           <div class="aero-comment__content" v-html="renderCommentContent(comment.content)" />
 
             <div class="aero-comment__tags">
@@ -765,13 +902,14 @@ onMounted(() => {
                     <span v-if="isSelfComment(reply)" class="aero-comment__badge aero-comment__badge--mine">我</span>
                     <BadgeCheck v-if="reply.verified" class="aero-comment__verified" :size="15" aria-label="已认证" />
                     <span v-if="reply.badge" class="aero-comment__badge">{{ reply.badge }}</span>
+                    <BlogCommentStatusBadge :status="reply.status" />
                   </div>
 
                   <div class="aero-comment__actions">
-                    <button class="aero-comment__reply-toggle aero-comment__reply-toggle--icon" type="button" :aria-label="`回复 ${reply.author}`" @click="openReply(comment, reply)">
+                    <button v-if="isApproved(reply)" class="aero-comment__reply-toggle aero-comment__reply-toggle--icon" type="button" :aria-label="`回复 ${reply.author}`" @click="openReply(comment, reply)">
                       <MessageCircle :size="16" />
                     </button>
-                    <button class="aero-comment__report" type="button" :disabled="reportingCommentId === reply.id" :aria-label="`举报 ${reply.author} 的评论`" @click="reportCurrentComment(reply)">
+                    <button v-if="isApproved(reply)" class="aero-comment__report" type="button" :disabled="reportingCommentId === reply.id" :aria-label="`举报 ${reply.author} 的评论`" @click="reportCurrentComment(reply)">
                       <Flag :size="15" />
                     </button>
                     <button v-if="isAdmin" class="aero-comment__delete" type="button" :disabled="deletingCommentId === reply.id" :aria-label="`删除 ${reply.author} 的评论`" @click="removeComment(reply)">
@@ -787,7 +925,6 @@ onMounted(() => {
                 回复 @{{ reply.replyTo }}<span v-if="reply.replyToUnavailable">（原评论已删除或暂不可见）</span>
                 <p v-else-if="reply.replyToContent">{{ reply.replyToContent }}</p>
               </blockquote>
-              <p v-if="reply.status && reply.status !== 'APPROVED'" role="status">待审核，暂未公开</p>
               <div class="aero-comment__content" v-html="renderCommentContent(reply.content)" />
 
                 <div class="aero-comment__tags">
@@ -856,11 +993,11 @@ onMounted(() => {
             </div>
           </template>
 
-          <button v-if="replyCount(comment) > 2" class="aero-comment__expand" type="button" @click="toggleReplies(comment.id)">
+          <button v-if="(comment.replies?.length || 0) > 2 || hasMoreReplies(comment)" class="aero-comment__expand" type="button" @click="toggleReplies(comment.id)">
             <ChevronDown :class="{ 'is-open': isExpanded(comment.id) }" :size="16" />
             {{ isExpanded(comment.id) ? '收起回复' : `展开回复（${replyCount(comment)}）` }}
           </button>
-          <button v-if="isExpanded(comment.id) && (comment.replies?.length || 0) < replyCount(comment)" class="aero-comment__expand" type="button" :disabled="repliesLoading.has(comment.id)" @click="loadMoreReplies(comment)">
+          <button v-if="isExpanded(comment.id) && hasMoreReplies(comment)" class="aero-comment__expand" type="button" :disabled="repliesLoading.has(comment.id)" @click="loadMoreReplies(comment)">
             {{ repliesLoading.has(comment.id) ? '加载中...' : '加载更多回复' }}
           </button>
         </div>

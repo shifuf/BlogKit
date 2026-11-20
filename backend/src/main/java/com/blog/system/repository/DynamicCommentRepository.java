@@ -8,8 +8,50 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import java.util.List;
+import java.util.Optional;
+import jakarta.persistence.LockModeType;
+import org.springframework.data.jpa.repository.Lock;
 
 public interface DynamicCommentRepository extends JpaRepository<DynamicComment, Long> {
+    @Query("select c.dynamic.id from DynamicComment c where c.id = :id")
+    Optional<Long> findDynamicId(@Param("id") Long id);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from DynamicComment c where c.id = :id")
+    Optional<DynamicComment> findLockedById(@Param("id") Long id);
+
+    @Query("select c from DynamicComment c where c.dynamic.id = :dynamicId and c.parent is null and c.visible = true "
+            + "and (c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED "
+            + "or (:ownerUserId is not null and c.ownerUserId = :ownerUserId) "
+            + "or (:ownerUserId is null and c.ownerUserId is null and :guestHash is not null and c.guestIdentityHash = :guestHash)) "
+            + "order by case when c.status <> com.blog.system.domain.comment.ArticleCommentStatus.APPROVED then 0 else 1 end, c.createdAt desc, c.id desc")
+    Page<DynamicComment> findVisibleRoots(@Param("dynamicId") Long dynamicId, @Param("ownerUserId") Long ownerUserId,
+                                         @Param("guestHash") String guestHash, Pageable pageable);
+
+    @Query("select c from DynamicComment c where c.parent.id = :parentId and c.visible = true "
+            + "and (c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED "
+            + "or (:ownerUserId is not null and c.ownerUserId = :ownerUserId) "
+            + "or (:ownerUserId is null and c.ownerUserId is null and :guestHash is not null and c.guestIdentityHash = :guestHash)) "
+            + "order by case when c.status <> com.blog.system.domain.comment.ArticleCommentStatus.APPROVED then 0 else 1 end, c.createdAt asc, c.id asc")
+    Page<DynamicComment> findVisibleReplies(@Param("parentId") Long parentId, @Param("ownerUserId") Long ownerUserId,
+                                           @Param("guestHash") String guestHash, Pageable pageable);
+
+    /** At most two replies per root, prioritising the viewer's own nonpublic replies. */
+    @Query(value = """
+            select c.* from dynamic_comment c where c.id in (
+              select id from (
+                select id, row_number() over(partition by parent_id order by
+                  case when status <> 'APPROVED' then 0 else 1 end, created_at, id) as row_num
+                from dynamic_comment where parent_id in (:ids) and visible = true and (
+                  status = 'APPROVED'
+                  or (cast(:ownerUserId as bigint) is not null and owner_user_id = cast(:ownerUserId as bigint))
+                  or (cast(:ownerUserId as bigint) is null and owner_user_id is null
+                      and cast(:guestHash as varchar) is not null and guest_identity_hash = cast(:guestHash as varchar)))
+              ) ranked where row_num <= 2
+            ) order by c.created_at, c.id
+            """, nativeQuery = true)
+    List<DynamicComment> findVisibleReplyPreviews(@Param("ids") List<Long> ids, @Param("ownerUserId") Long ownerUserId,
+                                                 @Param("guestHash") String guestHash);
     List<DynamicComment> findByDynamic_IdAndVisibleTrueOrderByCreatedAtDesc(Long dynamicId);
 
     /** 前台：某动态的根评论（无 parent），分页倒序。 */

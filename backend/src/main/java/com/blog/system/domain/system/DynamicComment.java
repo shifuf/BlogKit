@@ -1,5 +1,6 @@
 package com.blog.system.domain.system;
 
+import com.blog.system.domain.comment.ArticleCommentStatus;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.FetchType;
@@ -11,11 +12,13 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 
-/** 动态评论：游客可发表（昵称+内容），以 guestKey/ip 备注，visible 控制是否展示；支持一层回复（parent）。 */
+/** 动态评论：服务端凭证和真实账号记录归属；审核状态与管理员可见性独立。 */
 @Entity
 @Table(name = "dynamic_comment", indexes = @Index(name = "idx_dyn_comment_dynamic", columnList = "dynamic_id"))
 public class DynamicComment {
@@ -49,6 +52,16 @@ public class DynamicComment {
 
     @Column(name = "guest_key", length = 64)
     private String guestKey;
+
+    @Column(name = "guest_identity_hash", length = 64)
+    private String guestIdentityHash;
+
+    @Column(name = "owner_user_id")
+    private Long ownerUserId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 32)
+    private ArticleCommentStatus status = ArticleCommentStatus.APPROVED;
 
     @Column(length = 64)
     private String ip;
@@ -127,6 +140,18 @@ public class DynamicComment {
     public void setGuestKey(String guestKey) {
         this.guestKey = guestKey;
     }
+
+    public String getGuestIdentityHash() { return guestIdentityHash; }
+
+    public void setGuestIdentityHash(String guestIdentityHash) { this.guestIdentityHash = guestIdentityHash; }
+
+    public Long getOwnerUserId() { return ownerUserId; }
+
+    public void setOwnerUserId(Long ownerUserId) { this.ownerUserId = ownerUserId; }
+
+    public ArticleCommentStatus getStatus() { return status; }
+
+    public void setStatus(ArticleCommentStatus status) { this.status = status; }
 
     public String getIp() {
         return ip;

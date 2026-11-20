@@ -396,11 +396,17 @@ const fieldGroups = {
     defaultValue: false,
     extra: '关闭后小程序会隐藏评论入口、评论列表和评论统计；文章是否允许评论请在文章编辑页单独控制。'
   }, {
+    key: 'commentAiModerationEnabled',
+    label: 'AI 审核评论',
+    type: 'switch',
+    defaultValue: true,
+    extra: '文章与动态的新评论先由 AI 审核，通过后自动公开。使用「AI 服务」配置；调用失败保留待审，管理员可随时处理。'
+  }, {
     key: 'commentModerationEnabled',
-    label: '开启评论审核',
+    label: '人工审核评论',
     type: 'switch',
     defaultValue: false,
-    extra: '开启后新评论先进入待审核，管理员通过后前台才展示。'
+    extra: '关闭 AI 审核时生效。开启后新评论先进入待审核，管理员通过后公开；本人始终可查看自己的审核状态。'
   }, {
     key: 'blockedCommentWords',
     label: '评论屏蔽词',
@@ -409,7 +415,7 @@ const fieldGroups = {
     full: true,
     rows: 4,
     maxlength: 1000,
-    extra: '多个词用逗号或换行分隔；命中后评论进入待审核。'
+    extra: '多个词用逗号或换行分隔；命中后标为垃圾评论，AI 不会自动通过。'
   }, {
     key: 'defaultArticleStatus',
     label: '新文章默认状态',

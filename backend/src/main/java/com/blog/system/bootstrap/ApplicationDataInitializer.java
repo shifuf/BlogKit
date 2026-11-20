@@ -195,6 +195,7 @@ public class ApplicationDataInitializer implements CommandLineRunner {
         seedSetting("blog", "allowRegister", "true", "是否允许普通用户注册用于收藏点赞");
         seedSetting("blog", "commentsEnabled", "false", "小程序评论展示兼容开关；文章是否允许评论由文章编辑页单独控制");
         seedSetting("blog", "commentModerationEnabled", "false", "是否启用评论先审后发");
+        seedSetting("blog", "commentAiModerationEnabled", "true", "新评论由 AI 审核，通过后自动公开；不可用时保留待审");
         seedSetting("blog", "blockedCommentWords", "", "命中后进入待审核的评论屏蔽词，多个用逗号或换行分隔");
         seedSetting("blog", "defaultArticleStatus", "PUBLISHED", "管理端新文章默认状态");
         seedSetting("blog", "articlePageSize", "10", "文章列表默认分页大小");

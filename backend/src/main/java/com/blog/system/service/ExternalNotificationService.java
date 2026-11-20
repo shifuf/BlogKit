@@ -172,16 +172,27 @@ public class ExternalNotificationService {
             String html,
             Map<String, Object> variables
     ) {
+        return sendTemplatedEmailInternal(to, settingKey, defaultCode, subject, plain, html, variables, null);
+    }
+
+    public String sendIdempotentTemplatedEmail(String to, String settingKey, String defaultCode,
+            String subject, String plain, String html, Map<String, Object> variables, String idempotencyKey) {
+        if (!StringUtils.hasText(idempotencyKey)) throw new IllegalArgumentException("An email idempotency key is required");
+        return sendTemplatedEmailInternal(to, settingKey, defaultCode, subject, plain, html, variables, idempotencyKey);
+    }
+
+    private String sendTemplatedEmailInternal(String to, String settingKey, String defaultCode,
+            String subject, String plain, String html, Map<String, Object> variables, String idempotencyKey) {
         String template = resolveEmailTemplateCode(settingKey, defaultCode);
         String err = null;
         if (StringUtils.hasText(template)) {
-            err = sendEmail(to, subject, plain, null, template, variables);
+            err = sendEmailInternal(to, subject, plain, null, template, variables, idempotencyKey);
             if (err == null) {
                 return null;
             }
-            log.info("模板发信失败，回退纯文本/HTML template={} err={}", template, err);
+            log.info("模板发信失败，回退纯文本/HTML template={}", template);
         }
-        return sendEmail(to, subject, plain, html);
+        return sendEmailInternal(to, subject, plain, html, null, null, idempotencyKey);
     }
 
     /** 读取通知配置中的邮件模板 code；空则用 defaultCode。 */

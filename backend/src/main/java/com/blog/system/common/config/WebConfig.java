@@ -90,6 +90,7 @@ public class WebConfig implements WebMvcConfigurer {
                         "/api/v1/articles/*/like",
                         "/api/v1/articles/*/engagement",
                         "/api/v1/comments",
+                        "/api/v1/comments/identity",
                         "/api/v1/comments/*/report",
                         "/api/v1/downloads/open",
                         "/api/v1/article-media/open",

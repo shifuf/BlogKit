@@ -200,6 +200,7 @@ public class PublicSystemController {
     @GetMapping("/music/search")
     public ApiResponse<List<MusicService.MusicSearchItem>> searchMusic(
             @RequestParam String keyword,
+            @RequestParam(defaultValue = "all") String platform,
             HttpServletRequest request
     ) {
         String ip = clientIpResolver.resolve(request);
@@ -208,7 +209,7 @@ public class PublicSystemController {
         }
         // 明文返回：管理端常以 http://IP 访问，非安全上下文无 crypto.subtle，无法解 AES 密封。
         // 搜索结果本身不含可直连播放地址（rid 已编码），无需额外混淆。
-        return ApiResponse.ok(musicService.search(keyword));
+        return ApiResponse.ok(musicService.search(keyword, platform));
     }
 
     @GetMapping("/music/resolve")

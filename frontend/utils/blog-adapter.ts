@@ -146,6 +146,7 @@ export const toBlogComment = (comment: CommentSummary): CommentItem => {
     // IP 归属地（省/市），后端字段名为 region，前台以 location 标签展示。
     location: comment.region || undefined,
     status: comment.status,
+    mine: comment.mine === true,
     replyToCommentId: comment.replyToCommentId,
     replyTo: comment.replyTo || undefined,
     replyToContent: comment.replyToContent,

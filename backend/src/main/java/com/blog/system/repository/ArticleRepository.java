@@ -19,6 +19,12 @@ import java.util.Set;
 import java.time.OffsetDateTime;
 
 public interface ArticleRepository extends JpaRepository<Article, Long> {
+    @Modifying(flushAutomatically = true)
+    @Query("update Article a set a.commentCount = a.commentCount + :delta where a.id = :id")
+    int adjustCommentCount(@Param("id") Long id, @Param("delta") long delta);
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select a from Article a where a.id = :id")
+    Optional<Article> findLockedById(@Param("id") Long id);
     Page<Article> findByCoverImageUrlIsNotNull(Pageable pageable);
 
     @EntityGraph(attributePaths = {"category", "author"})

@@ -120,6 +120,8 @@ export interface DynamicPost {
   updatedAt: string;
 }
 export interface DynamicComment {
+  status?: string;
+  mine?: boolean;
   id: number;
   authorName: string;
   content: string;
@@ -131,6 +133,7 @@ export interface DynamicComment {
   replies?: DynamicComment[];
 }
 export interface CommentSummary {
+  mine?: boolean;
   replyToCommentId?: number | null;
   replyTo?: string | null;
   replyToContent?: string | null;
@@ -310,6 +313,7 @@ export interface FriendLinkSummary {
   updatedAt?: string;
 }
 export interface CommentItem {
+  mine?: boolean;
   replyToCommentId?: number | null;
   replyToContent?: string | null;
   replyToUnavailable?: boolean;

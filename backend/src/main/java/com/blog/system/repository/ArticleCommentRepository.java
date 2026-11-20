@@ -14,6 +14,49 @@ import java.util.Collection;
 import java.util.List;
 
 public interface ArticleCommentRepository extends JpaRepository<ArticleComment, Long> {
+    @Query("select c.article.id from ArticleComment c where c.id = :id")
+    java.util.Optional<Long> findArticleIdById(@Param("id") Long id);
+
+    @org.springframework.data.jpa.repository.Lock(jakarta.persistence.LockModeType.PESSIMISTIC_WRITE)
+    @Query("select c from ArticleComment c where c.id = :id")
+    java.util.Optional<ArticleComment> findLockedById(@Param("id") Long id);
+
+    @EntityGraph(attributePaths = {"author"})
+    @Query(value = """
+            select c from ArticleComment c where c.article.id = :articleId and c.parent is null
+            and (c.status is null or c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED
+                or (:userId is not null and c.author.id = :userId and c.author.username <> '__guest__')
+                or (:userId is null and :hash is not null and c.author.username = '__guest__' and c.guestIdentityHash = :hash))
+            order by case when c.status <> com.blog.system.domain.comment.ArticleCommentStatus.APPROVED then 0 else 1 end,
+                c.pinned desc, c.createdAt desc, c.id desc
+            """, countQuery = """
+            select count(c) from ArticleComment c where c.article.id = :articleId and c.parent is null
+            and (c.status is null or c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED
+                or (:userId is not null and c.author.id = :userId and c.author.username <> '__guest__')
+                or (:userId is null and :hash is not null and c.author.username = '__guest__' and c.guestIdentityHash = :hash))
+            """)
+    Page<ArticleComment> findVisibleRootComments(@Param("articleId") Long articleId, @Param("userId") Long userId,
+            @Param("hash") String hash, Pageable pageable);
+
+    @EntityGraph(attributePaths = {"author", "parent", "parent.author"})
+    @Query(value = """
+            select c from ArticleComment c where c.parent.id = :parentId
+            and (c.parent.status is null or c.parent.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED)
+            and (c.status is null or c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED
+                or (:userId is not null and c.author.id = :userId and c.author.username <> '__guest__')
+                or (:userId is null and :hash is not null and c.author.username = '__guest__' and c.guestIdentityHash = :hash))
+            order by case when c.status <> com.blog.system.domain.comment.ArticleCommentStatus.APPROVED then 0 else 1 end,
+                c.createdAt asc, c.id asc
+            """, countQuery = """
+            select count(c) from ArticleComment c where c.parent.id = :parentId
+            and (c.parent.status is null or c.parent.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED)
+            and (c.status is null or c.status = com.blog.system.domain.comment.ArticleCommentStatus.APPROVED
+                or (:userId is not null and c.author.id = :userId and c.author.username <> '__guest__')
+                or (:userId is null and :hash is not null and c.author.username = '__guest__' and c.guestIdentityHash = :hash))
+            """)
+    Page<ArticleComment> findVisibleReplies(@Param("parentId") Long parentId, @Param("userId") Long userId,
+            @Param("hash") String hash, Pageable pageable);
+
     @EntityGraph(attributePaths = {"author", "article", "parent", "parent.author"})
     @Query("select c from ArticleComment c where c.id = :id")
     java.util.Optional<ArticleComment> findDetailedById(@Param("id") Long id);

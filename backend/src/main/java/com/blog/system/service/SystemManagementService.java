@@ -845,6 +845,11 @@ public class SystemManagementService {
     }
 
     @Transactional(readOnly = true)
+    public boolean isCommentAiModerationEnabled() {
+        return booleanSetting(readGroupValues("blog"), "commentAiModerationEnabled", true);
+    }
+
+    @Transactional(readOnly = true)
     public List<String> blockedCommentWords() {
         String value = settingValue(readGroupValues("blog"), "blockedCommentWords", "");
         if (!StringUtils.hasText(value)) {
@@ -1060,7 +1065,7 @@ public class SystemManagementService {
                     "friendExchangeLogo",
                     "friendPageIntro"
             );
-            case "blog" -> Set.of("allowRegister", "commentsEnabled", "commentModerationEnabled", "blockedCommentWords", "defaultArticleStatus", "articlePageSize");
+            case "blog" -> Set.of("allowRegister", "commentsEnabled", "commentModerationEnabled", "commentAiModerationEnabled", "blockedCommentWords", "defaultArticleStatus", "articlePageSize");
             case "home" -> Set.of(
                     "heroEnabled",
                     "heroImageUrl",
@@ -1149,6 +1154,7 @@ public class SystemManagementService {
             case "blog.allowRegister" -> "是否允许普通用户注册";
             case "blog.commentsEnabled" -> "小程序评论展示兼容开关；文章是否允许评论由文章编辑页单独控制";
             case "blog.commentModerationEnabled" -> "是否启用评论先审后发";
+            case "blog.commentAiModerationEnabled" -> "新评论由 AI 审核，通过后自动公开；不可用时保留待审";
             case "blog.blockedCommentWords" -> "命中后进入待审核的评论屏蔽词";
             case "blog.defaultArticleStatus" -> "管理端新文章默认状态";
             case "blog.articlePageSize" -> "文章列表默认分页大小";

@@ -54,6 +54,9 @@ public class ArticleComment {
     @Column(length = 256)
     private String guestWebsite;
 
+    @Column(length = 64)
+    private String guestIdentityHash;
+
     // 评论时的 IP 归属地（省/市，如「广东省深圳市」）。内网/解析失败为 null。
     @Column(length = 64)
     private String region;
@@ -168,6 +171,9 @@ public class ArticleComment {
     public String getRegion() {
         return region;
     }
+
+    public String getGuestIdentityHash() { return guestIdentityHash; }
+    public void setGuestIdentityHash(String value) { guestIdentityHash = value; }
 
     public void setRegion(String region) {
         this.region = region;

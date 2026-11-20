@@ -64,17 +64,37 @@ public class MusicService {
     }
 
     public List<MusicSearchItem> search(String keyword) {
+        return search(keyword, "all");
+    }
+
+    public List<MusicSearchItem> search(String keyword, String platform) {
+        String selected = platform == null ? "all" : platform.trim();
+        if (!List.of("all", "qq", "netease", "kugou").contains(selected)) throw new BusinessException("不支持的音乐平台");
         String safe = required(keyword, "请输入歌曲名或歌手名");
         if (safe.length() > 80) throw new BusinessException("搜索关键词不能超过 80 个字符");
-        // Search the configured providers independently so one unavailable service does not hide
-        // the results from the others.
+        boolean configured = switch (selected) {
+            case "qq" -> StringUtils.hasText(settings.key("cyQqKey")) || StringUtils.hasText(settings.key("chkszKey"));
+            case "netease" -> StringUtils.hasText(settings.key("cyNeteaseKey")) || StringUtils.hasText(settings.key("chkszKey"));
+            case "kugou" -> StringUtils.hasText(settings.key("chkszKey"));
+            default -> true; // Preserve the original all-platform call when no providers are configured.
+        };
+        if (!configured) throw new BusinessException("当前平台音乐服务暂不可用，请管理员检查音乐配置");
+        // Select providers before merging/capping so another platform cannot use this request's
+        // quota or push the chosen platform's songs out of the first 30 results.
         List<ProviderItem> items = new ArrayList<>();
-        collect(items, () -> searchProvider(safe, apiBase, settings.key("cyQqKey"), "qq", "迟言 QQ"));
-        collect(items, () -> searchProvider(safe, neteaseApiBase, settings.key("cyNeteaseKey"), "netease", "迟言网易云"));
-        for (String source : List.of("chksz_qq", "chksz_netease", "chksz_kugou")) {
-            collect(items, () -> searchChksz(safe, source));
+        boolean failed = false;
+        if ("all".equals(selected) || "qq".equals(selected)) {
+            failed |= !collect(items, () -> searchProvider(safe, apiBase, settings.key("cyQqKey"), "qq", "迟言 QQ"));
         }
-        if (items.isEmpty() && !providerStatus().isEmpty()) throw new BusinessException("音乐服务暂不可用，请稍后重试；管理员可在音乐配置中查看原因");
+        if ("all".equals(selected) || "netease".equals(selected)) {
+            failed |= !collect(items, () -> searchProvider(safe, neteaseApiBase, settings.key("cyNeteaseKey"), "netease", "迟言网易云"));
+        }
+        for (String source : List.of("chksz_qq", "chksz_netease", "chksz_kugou")) {
+            if ("all".equals(selected) || source.equals("chksz_" + selected)) {
+                failed |= !collect(items, () -> searchChksz(safe, source));
+            }
+        }
+        if (items.isEmpty() && failed) throw new BusinessException("当前平台音乐服务暂不可用，请稍后重试");
         return merge(items, safe);
     }
 
@@ -91,8 +111,13 @@ public class MusicService {
         return result;
     }
 
-    private void collect(List<ProviderItem> target, java.util.function.Supplier<List<ProviderItem>> supplier) {
-        try { target.addAll(supplier.get()); } catch (RuntimeException ignored) { /* isolate an unavailable provider */ }
+    private boolean collect(List<ProviderItem> target, java.util.function.Supplier<List<ProviderItem>> supplier) {
+        try {
+            target.addAll(supplier.get());
+            return true;
+        } catch (RuntimeException ignored) {
+            return false; // isolate an unavailable provider, without reusing another search's status
+        }
     }
 
     private List<MusicSearchItem> merge(List<ProviderItem> items, String keyword) {
@@ -117,10 +142,21 @@ public class MusicService {
             }
             ProviderItem first = group.get(0);
             String bestCover = group.stream().map(ProviderItem::cover).filter(StringUtils::hasText).findFirst().orElse("");
-            result.add(new MusicSearchItem(encodeRid("combined", keyword, encodedCandidates), first.name(), first.artist(), coverUrl(bestCover), "combined", "自动切换"));
+            String label = group.stream().map(item -> platformName(item.source())).distinct().count() > 1
+                    ? "多平台" : platformName(first.source());
+            result.add(new MusicSearchItem(encodeRid("combined", keyword, encodedCandidates), first.name(), first.artist(), coverUrl(bestCover), "combined", label));
             if (result.size() >= 30) break;
         }
         return result;
+    }
+
+    private String platformName(String source) {
+        return switch (source) {
+            case "qq", "chksz_qq" -> "QQ 音乐";
+            case "netease", "chksz_netease" -> "网易云音乐";
+            case "chksz_kugou" -> "酷狗音乐";
+            default -> "多平台";
+        };
     }
 
     public java.util.Map<String, String> providerStatus() { return apiClient.status(); }

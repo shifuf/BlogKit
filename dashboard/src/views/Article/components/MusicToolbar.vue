@@ -24,6 +24,15 @@
         </div>
 
         <div class="music-modal-search">
+          <label class="platform-field">
+            <span>搜索平台</span>
+            <select v-model="platform" aria-label="搜索平台" @change="changePlatform">
+              <option value="all">全部平台</option>
+              <option value="qq">QQ 音乐</option>
+              <option value="netease">网易云音乐</option>
+              <option value="kugou">酷狗音乐</option>
+            </select>
+          </label>
           <div class="search-field">
             <svg class="search-icon" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
               <circle cx="11" cy="11" r="7"></circle>
@@ -49,10 +58,15 @@
             <div class="hint-title">正在搜索</div>
             <div class="hint-desc">正在搜索可用音乐源…</div>
           </div>
+          <div v-else-if="searchError" class="music-hint" role="status">
+            <div class="hint-icon">♪</div>
+            <div class="hint-title">搜索暂不可用</div>
+            <div class="hint-desc">{{ searchError }}，可尝试其他平台或稍后重试</div>
+          </div>
           <div v-else-if="list.length === 0 && searched" class="music-hint">
             <div class="hint-icon">♪</div>
             <div class="hint-title">未找到结果</div>
-            <div class="hint-desc">换个关键词再试一次</div>
+            <div class="hint-desc">试试其他平台或关键词</div>
           </div>
           <div v-else-if="list.length === 0" class="music-hint">
             <div class="hint-icon">♫</div>
@@ -79,7 +93,7 @@
               <div class="music-name">{{ item.name }}</div>
               <div class="music-artist">
                 <span class="artist-text">{{ item.artist || '未知歌手' }}</span>
-                <span class="source-badge">自动切换</span>
+                <span class="source-badge">{{ item.sourceName || '多平台' }}</span>
               </div>
             </div>
             <button
@@ -137,8 +151,10 @@ const emit = defineEmits(['insert']);
 
 const visible = ref(false);
 const keyword = ref('');
+const platform = ref('all');
 const loading = ref(false);
 const searched = ref(false);
+const searchError = ref('');
 const list = ref([]);
 const selectedIndex = ref(-1);
 const previewIndex = ref(-1);
@@ -148,6 +164,8 @@ const searchInputRef = ref(null);
 const previewContainer = ref(null);
 
 let previewPlayer = null;
+let searchGeneration = 0;
+let previewGeneration = 0;
 const trackCache = new Map();
 
 const selected = computed(() => (selectedIndex.value >= 0 ? list.value[selectedIndex.value] : null));
@@ -165,6 +183,7 @@ const open = async () => {
 };
 
 const stopPreview = () => {
+  previewGeneration += 1;
   previewIndex.value = -1;
   previewLoading.value = false;
   if (previewPlayer) {
@@ -174,27 +193,51 @@ const stopPreview = () => {
 };
 
 const close = () => {
+  searchGeneration += 1;
+  loading.value = false;
   stopPreview();
+  trackCache.clear();
   visible.value = false;
 };
 
 const doSearch = async () => {
   const q = keyword.value.trim();
   if (!q) return message.warning('请输入歌曲名或歌手名');
+  const generation = ++searchGeneration;
+  const currentPlatform = platform.value;
+  const isCurrent = () => visible.value && generation === searchGeneration && currentPlatform === platform.value;
   loading.value = true;
   searched.value = true;
+  searchError.value = '';
+  list.value = [];
   selectedIndex.value = -1;
   previewError.value = '';
   trackCache.clear();
   stopPreview();
   try {
-    list.value = (await searchMusic(q)) || [];
+    const result = await searchMusic(q, currentPlatform);
+    if (isCurrent()) list.value = result || [];
   } catch (error) {
+    if (!isCurrent()) return;
     list.value = [];
-    message.error(error?.message || '搜索失败');
+    searchError.value = error?.message || '搜索失败';
+    message.error(searchError.value);
   } finally {
-    loading.value = false;
+    if (isCurrent()) loading.value = false;
   }
+};
+
+const changePlatform = () => {
+  searchGeneration += 1;
+  loading.value = false;
+  searched.value = false;
+  searchError.value = '';
+  list.value = [];
+  selectedIndex.value = -1;
+  previewError.value = '';
+  trackCache.clear();
+  stopPreview();
+  if (visible.value && keyword.value.trim()) return doSearch();
 };
 
 const selectItem = i => {
@@ -202,10 +245,11 @@ const selectItem = i => {
   previewError.value = '';
 };
 
-const resolveTrack = async item => {
+const resolveTrack = async (item, isCurrent) => {
   if (!item?.rid) throw new Error('缺少音乐资源 ID');
   if (trackCache.has(item.rid)) return trackCache.get(item.rid);
   const data = await resolveMusic(item.rid);
+  if (!isCurrent()) return null;
   if (!data?.url) throw new Error('该音乐暂时没有可播放地址');
   const track = {
     name: item.name || '未命名音乐',
@@ -227,17 +271,21 @@ const togglePreview = async i => {
   }
   const item = list.value[i];
   if (!item) return;
+  stopPreview();
+  const generation = previewGeneration;
+  const currentSearch = searchGeneration;
+  const currentPlatform = platform.value;
+  const isCurrent = () => visible.value && generation === previewGeneration && currentSearch === searchGeneration
+    && currentPlatform === platform.value && list.value[i]?.rid === item.rid;
   selectedIndex.value = i;
   previewError.value = '';
   previewLoading.value = true;
   previewIndex.value = i;
   try {
-    const track = await resolveTrack(item);
-    if (previewPlayer) {
-      previewPlayer.destroy?.();
-      previewPlayer = null;
-    }
+    const track = await resolveTrack(item, isCurrent);
+    if (!isCurrent()) return;
     await nextTick();
+    if (!isCurrent()) return;
     const create = window.createPlainMusicPlayer;
     if (typeof create !== 'function') {
       throw new Error('播放器脚本未加载，请刷新后台页面');
@@ -245,11 +293,12 @@ const togglePreview = async i => {
     if (!previewContainer.value) throw new Error('预览容器不可用');
     previewPlayer = create(previewContainer.value, track, { autoplay: true, mutex: true });
   } catch (error) {
+    if (!isCurrent()) return;
     stopPreview();
     previewError.value = error?.message || '试听失败';
     message.error(previewError.value);
   } finally {
-    previewLoading.value = false;
+    if (isCurrent()) previewLoading.value = false;
   }
 };
 
@@ -270,7 +319,7 @@ const insert = () => {
   message.success('音乐组件已插入');
 };
 
-onBeforeUnmount(() => stopPreview());
+onBeforeUnmount(close);
 </script>
 
 <style scoped>
@@ -358,6 +407,29 @@ onBeforeUnmount(() => stopPreview());
   background: #fafafa;
 }
 .music-help { color: #8c8c8c; font-size: 12px; }
+.platform-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #4b5563;
+  font-size: 13px;
+}
+.platform-field select {
+  flex: 1;
+  min-width: 0;
+  max-width: 220px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #d9d9d9;
+  border-radius: 8px;
+  background: #fff;
+  color: #1f2937;
+  font: inherit;
+}
+.platform-field select:focus-visible {
+  outline: 2px solid #1677ff;
+  outline-offset: 2px;
+}
 .search-field {
   display: flex;
   align-items: center;
@@ -371,7 +443,7 @@ onBeforeUnmount(() => stopPreview());
   border-color: #1677ff;
   box-shadow: 0 0 0 2px rgba(22, 119, 255, .12);
 }
-.search-icon { margin-right: 8px; color: #8c8c8c; }
+.search-icon { flex-shrink: 0; margin-right: 8px; color: #8c8c8c; }
 .search-field input {
   flex: 1;
   min-width: 0;
@@ -543,6 +615,7 @@ onBeforeUnmount(() => stopPreview());
 .preview-btn {
   width: 36px;
   height: 36px;
+  flex-shrink: 0;
   display: grid;
   place-items: center;
   border: 1px solid #e5e7eb;
@@ -656,6 +729,8 @@ onBeforeUnmount(() => stopPreview());
     border-radius: 16px 16px 0 0;
   }
   .music-modal-footer { flex-direction: column; align-items: stretch; }
+  .music-modal-body { min-height: 120px; }
+  .platform-field select { max-width: none; }
   .insert-btn { width: 100%; }
 }
 </style>
